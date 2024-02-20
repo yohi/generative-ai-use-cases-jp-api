@@ -28,19 +28,18 @@ app = FastAPI()
 def read_root():
     return {"Hello": "World"}
 
-
-def call_lambda(chat):
-    client = boto3.client('cognito-idp', region_name=REGION)
+def get_id_token():
+    """
+    """
+    cognito_idp = boto3.client('cognito-idp', region_name=REGION)
     srp = warrant.aws_srp.AWSSRP(
         username=USERNAME,
         password=PASSWORD,
         pool_id=USER_POOL_ID,
         client_id=CLIENT_ID,
-        client=client
+        client=cognito_idp,
     )
-
     srp_a = srp.get_auth_params()['SRP_A']
-
     response = client.initiate_auth(
         AuthFlow='USER_SRP_AUTH',
         AuthParameters={
@@ -49,7 +48,7 @@ def call_lambda(chat):
         },
         ClientId=CLIENT_ID,
     )
-    # assert(response['ChallengeName'] == 'PASSWORD_VERIFIER')
+    assert response['ChallengeName'] == 'PASSWORD_VERIFIER'
     challenge_response = srp.process_challenge(response['ChallengeParameters'])
     response = client.respond_to_auth_challenge(
         ClientId=CLIENT_ID,
@@ -57,32 +56,42 @@ def call_lambda(chat):
         ChallengeResponses=challenge_response,
     )
 
-    id_token = response['AuthenticationResult']['IdToken']
-    cognito_identity_client = boto3.client(
+    return response['AuthenticationResult']['IdToken']
+
+def get_credentials():
+    """
+    """
+    id_token = get_id_token()
+    cognito_identity = boto3.client(
         'cognito-identity',
         region_name=REGION,
     )
-    response = cognito_identity_client.get_id(
+    response = cognito_identity.get_id(
         IdentityPoolId=IDENTITY_POOL_ID,
         Logins={
-            'cognito-idp.us-east-1.amazonaws.com/' + USER_POOL_ID: id_token,
+            f'cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}': id_token,
         }
     )
-
     identity_id = response['IdentityId']
-    response = cognito_identity_client.get_credentials_for_identity(
+    response = cognito_identity.get_credentials_for_identity(
         IdentityId=identity_id,
         Logins={
-            'cognito-idp.us-east-1.amazonaws.com/' + USER_POOL_ID: id_token,
+            f'cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}': id_token,
         }
     )
+    return response['Credentials']
 
+
+def call_lambda(chat):
+    """
+    """
+    credentials = get_credentials()
     lambda_client = boto3.client(
         'lambda',
         region_name=REGION,
-        aws_access_key_id=response['Credentials']['AccessKeyId'],
-        aws_secret_access_key=response['Credentials']['SecretKey'],
-        aws_session_token=response['Credentials']['SessionToken'],
+        aws_access_key_id=credentials['AccessKeyId'],
+        aws_secret_access_key=credentials['SecretKey'],
+        aws_session_token=credentials['SessionToken'],
     )
 
     response = lambda_client.invoke_with_response_stream(
