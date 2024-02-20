@@ -28,6 +28,7 @@ app = FastAPI()
 def read_root():
     return {"Hello": "World"}
 
+
 def get_id_token():
     """
     """
@@ -40,7 +41,7 @@ def get_id_token():
         client=cognito_idp,
     )
     srp_a = srp.get_auth_params()['SRP_A']
-    response = client.initiate_auth(
+    response = cognito_idp.initiate_auth(
         AuthFlow='USER_SRP_AUTH',
         AuthParameters={
             'USERNAME': USERNAME,
