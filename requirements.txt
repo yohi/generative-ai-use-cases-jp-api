@@ -5,3 +5,6 @@ cryptography
 fastapi
 pydantic
 uvicorn
+requests
+
+atlassian-python-api
