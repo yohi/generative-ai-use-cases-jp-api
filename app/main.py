@@ -51,13 +51,14 @@ def get_id_token():
     )
     assert response['ChallengeName'] == 'PASSWORD_VERIFIER'
     challenge_response = srp.process_challenge(response['ChallengeParameters'])
-    response = client.respond_to_auth_challenge(
+    response = cognito_idp.respond_to_auth_challenge(
         ClientId=CLIENT_ID,
         ChallengeName='PASSWORD_VERIFIER',
         ChallengeResponses=challenge_response,
     )
 
     return response['AuthenticationResult']['IdToken']
+
 
 def get_credentials():
     """
