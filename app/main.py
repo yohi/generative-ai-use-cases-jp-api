@@ -18,6 +18,7 @@ LAMBDA_FUNCTION_NAME = os.environ['LAMBDA_FUNCTION_NAME']
 
 
 class Chat(BaseModel):
+    system_message: str
     content: str
 
 
@@ -107,7 +108,7 @@ def call_lambda(chat):
             "messages": [
                 {
                     "role": "system",
-                    "content": "あなたはチャットでユーザを支援するAIアシスタントです。"
+                    "content": chat.system_message,
                 },
                 {
                     "role": "user",
