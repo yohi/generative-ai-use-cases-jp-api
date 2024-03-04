@@ -5,3 +5,9 @@ cryptography
 fastapi
 pydantic
 uvicorn
+
+litellm
+
+
+
+google-generativeai
