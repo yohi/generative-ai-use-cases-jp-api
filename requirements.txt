@@ -1,1 +1,5 @@
+python-dotenv=1.0.1
 atlassian-python-api==3.41.10
+litellm==1.29.1
+google-cloud-aiplatform==1.43.0
+
