@@ -1,0 +1,16 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "32768:32768"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml
+    command:
+      - "--config"
+      - "/app/config.yaml"
+      - "--port"
+      - "32768"
+      - "--num_workers"
+      - "8"
+    env_file:
+      - ./.env

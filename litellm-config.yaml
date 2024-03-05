@@ -1,0 +1,11 @@
+model_list:
+  - model_name: gpt-3.5-turbo
+  # - model_name: gemini-pro
+    litellm_params:
+      model: gemini/gemini-pro
+  # - model_name: gpt-3.5-turbo
+  #   litellm_params:
+  #     model: gemini/gemini-pro
+
+litellm_settings:
+  drop_params: True
