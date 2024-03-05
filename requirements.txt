@@ -1,0 +1,13 @@
+boto3
+warrant
+git+https://github.com/mpdavis/python-jose.git@master
+cryptography
+fastapi
+pydantic
+uvicorn
+
+litellm
+
+
+
+google-generativeai

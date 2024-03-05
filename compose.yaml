@@ -1,0 +1,27 @@
+services:
+  app:
+    build:
+      context: .
+    env_file:
+      - ./.env
+    environment:
+      - PYTHONFAULTHANDLER=1
+      - TZ=Asia/Tokyo
+    ports:
+      - '56721:56721'
+    volumes:
+      - ./app:/code/app
+    command:
+      - 'uvicorn'
+      - 'app.main:app'
+      - '--host'
+      - '0.0.0.0'
+      - '--port'
+      - '56721'
+      - '--reload'
+        # - '--interface=asgi3'
+        # - '--lifespan=off'
+        # - '--proxy-headers'
+      - '--use-colors'
+        # - '--log-level=trace'
+
