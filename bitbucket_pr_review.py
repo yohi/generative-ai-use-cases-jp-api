@@ -11,7 +11,7 @@ import os
 import logging
 from dotenv import load_dotenv
 from litellm import completion
-from prompts import PROMPTS
+from prompt import CodeRabbitPrompt
 
 
 dir_path = os.path.dirname(os.path.abspath("__file__"))
@@ -19,6 +19,8 @@ dotenv_path = os.path.join(dir_path, '.env')
 load_dotenv(dotenv_path, verbose=True)
 
 AI_MODEL = 'gemini/gemini-pro'
+
+prompt = CodeRabbitPrompt()
 
 # --------------------------------
 # 1.loggerの設定
@@ -89,9 +91,9 @@ def main(args):
     logger.info(f'{pr.diff()=}')
     logger.info(f'{pr.diffstat()=}')
 
-    title = pr.title
-    description = pr.description
-    diff = pr.diff()
+    prompt.title = pr.title
+    prompt.description = pr.description
+    prompt.diff = pr.diff()
 
     # prompt = f"""
     # Please review the following pull request:
@@ -105,22 +107,25 @@ def main(args):
     # Provide a detailed technical review focusing on best practices, potential bugs or issues, security concerns, etc.
     # """
 
-    summalize_type_diff = PROMPTS.summalize_type_diff(title, description, diff)
-    prompt = summalize_type_diff
-    prompt += '''
-    Please write in Japanese.
-    '''
-    # print(summalize_type_diff)
-
-    # raise Exception('hoge')
-
-    print('=====')
-    print(PROMPTS.SYSTEM_MESSAGE['default'])
-    print('=====')
-    print(prompt)
-    print('=====')
-
-
+    # summalize_type_diff = PROMPTS.summalize_type_diff(title, description, diff)
+    print()
+    print()
+    print()
+    print()
+    print()
+    print()
+    print()
+    print()
+    print()
+    print(prompt.title)
+    print()
+    print()
+    content = prompt.summalize_type_diff
+    print(content)
+    return 0
+    # content += '''
+    # Please write in Japanese.
+    # '''
     # messages = {
     #     'system_message': PROMPTS.SYSTEM_MESSAGE['default'],
     #     'content': prompt,
@@ -130,13 +135,15 @@ def main(args):
     messages = [
       {
         "role": "system",
-        "content": PROMPTS.SYSTEM_MESSAGE['default']
+        "content": prompt.SYSTEM_MESSAGE['default']
       },
       {
         "role": "user",
-        "content": prompt,
+        "content": content,
       }
     ]
+
+    logger.info(f'{messages=}')
 
     response = completion(model=AI_MODEL, messages=messages)
     content = response.get('choices', [{}])[0].get('message', {}).get('content')

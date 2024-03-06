@@ -1,5 +1,67 @@
-class PROMPTS:
-    SYSTEM_MESSAGE = {
+
+class BasePrompt:
+    _SYSTEM_MESSAGE = {}
+    _SUMMARIZE = {}
+    _SUMMARIZE_RELEASE_NOTES = {}
+    _SUMMALIZE_TYPE_DIFF = ''
+    _TRIAGE_FILE_DIFF = ''
+    _SUMMARIZE_CHANGESETS = ''
+    _SUMMARIZE_PREFIX = ''
+    _SUMMARIZE_SHORT = ''
+    _REVIEW_FILE_DIFF = ''
+    _COMMENT = ''
+
+    def __format(self, template):
+        replaces = {key: value for key, value in self.__dict__.items()}
+        print(replaces)
+        return template.format(**replaces)
+        # return '\n'.join([eval(f"f'{row}'") for row in template.split('\n')])
+
+    @property
+    def summalize_type_diff(self):
+        print(self._SUMMALIZE_TYPE_DIFF)
+        title = 'hoge'
+        return self.__format(self._SUMMALIZE_TYPE_DIFF)
+
+    @property
+    def triage_file_diff(self):
+        return self.__format(self._TRIAGE_FILE_DIFF)
+
+    @property
+    def summarize_changesets(self):
+        return self.__format(self._SUMMARIZE_CHANGESETS)
+
+    @property
+    def summarize_prefix(self):
+        return self.__format(self._SUMMARIZE_PREFIX)
+
+    @property
+    def summarize_short(self):
+        return self.__format(self._SUMMARIZE_SHORT)
+
+    @property
+    def review_file_diff(self):
+        return self.__format(self._REVIEW_FILE_DIFF)
+
+    @property
+    def comment(self):
+        return self.__format(self._COMMENT)
+
+
+class CodeRabbitPrompt(BasePrompt):
+    title = ''
+    description = ''
+    file_diff = ''
+    raw_summary = ''
+    short_summary = ''
+    patches = ''
+    diff = ''
+    comment_chain = ''
+    comment = ''
+    filename = ''
+
+    # プロンプトの説明
+    _SYSTEM_MESSAGE = {
         'description': 'System message to be sent to OpenAI',
         'default': '''
 You are `@coderabbitai` (aka `github-actions[bot]`), a language model
@@ -25,7 +87,8 @@ disregarding minor issues.
         '''  # noqa[E501],
     }
 
-    SUMMARIZE = {
+    # 全体の要約生成プロンプト
+    _SUMMARIZE = {
         'description': 'The prompt for final summarization response',
         'default': '''
 Provide your final response in markdown with the following content:
@@ -43,7 +106,8 @@ GitHub pull request. Use the titles "Walkthrough" and "Changes" and they must be
         ''',  # noqa[E501]
     }
 
-    SUMMARIZE_RELEASE_NOTES = {
+    # リリースノートの要約生成プロンプト
+    _SUMMARIZE_RELEASE_NOTES = {
         'description': 'The prompt for generating release notes in the same chat as summarize stage',  # noqa[E501]
         'default': '''
 Craft concise release notes for the pull request.
@@ -54,8 +118,8 @@ and emphasize features visible to the end-user while omitting code-level details
         '''  # noqa[E501],
     }
 
-    # 要約
-    SUMMALIZE_TYPE_DIFF = '''
+    # 差分の要約生成プロンプト
+    _SUMMALIZE_TYPE_DIFF = '''
 ## GitHub PR Title
 
 {title}
@@ -79,8 +143,8 @@ variables, and any changes that might affect the external interface or
 behavior of the code.
 ''' # noqa[E501]
 
-    # ファイルの変更を要約
-    TRIAGE_FILE_DIFF = '''
+    # ファイルの変更要約生成プロンプト
+    _TRIAGE_FILE_DIFF = '''
 Below the summary, I would also like you to triage the diff as `NEEDS_REVIEW` or `APPROVED` based on the following criteria:
 
 - If the diff involves any modifications to the logic or functionality, even if they seem minor, triage it as `NEEDS_REVIEW`. This includes changes to control structures, function calls, or variable assignments that might impact the behavior of the code.
@@ -99,21 +163,21 @@ Important:
 - Do not mention that these changes affect the logic or functionality of the code in the summary. You must only use the triage status format above to indicate that.
 ''' # noqa[E501]
 
-    SUMMARIZE_CHANGESETS = '''
+    _SUMMARIZE_CHANGESETS = '''
 Provided below are changesets in this pull request. Changesets are in chronlogical order and new changesets are appended to the end of the list. The format consists of filename(s) and the summary of changes for those files. There is a separator between each changeset.
 Your task is to deduplicate and group together files with related/similar changes into a single changeset. Respond with the updated changesets using the same format as the input.
 
-{raw_summary}
+{self.raw_summary}
 ''' # noqa[E501]
 
-    SUMMARIZE_PREFIX = '''
+    _SUMMARIZE_PREFIX = '''
 Here is the summary of changes you have generated for files:
 ```
-{raw_summary}
+{self.raw_summary}
 ```
     '''
 
-    SUMMARIZE_SHORT = '''
+    _SUMMARIZE_SHORT = '''
 Your task is to provide a concise summary of the changes. This summary will be used as a prompt while reviewing each file and must be very clear for the AI bot to understand.
 
 Instructions:
@@ -125,22 +189,22 @@ Instructions:
 - The summary should not exceed 500 words.
 ''' # noqa[E501]
 
-    # ファイルの変更のレビュー
-    REVIEW_FILE_DIFF = '''
+    # ファイルの変更のレビュー要求
+    _REVIEW_FILE_DIFF = '''
 ## GitHub PR Title
 
-`{title}`
+`{self.title}`
 
 ## Description
 
 ```
-{description}
+{self.description}
 ```
 
 ## Summary of changes
 
 ```
-{short_summary}
+{self.short_summary}
 ```
 
 ## IMPORTANT Instructions
@@ -215,43 +279,43 @@ There's a syntax error in the add function.
 LGTM!
 ---
 
-## Changes made to `{filename}` for your review
+## Changes made to `{self.filename}` for your review
 
-{patches}
+{self.patches}
 `
 ''' # noqa[E501]
 
-    COMMENT = '''
+    _COMMENT = '''
 A comment was made on a GitHub PR review for a
-diff hunk on a file - `{filename}`. I would like you to follow
+diff hunk on a file - `{self.filename}`. I would like you to follow
 the instructions in that comment.
 
 ## GitHub PR Title
 
-`{title}`
+`{self.title}`
 
 ## Description
 
 ```
-{description}
+{self.description}
 ```
 
 ## Summary generated by the AI bot
 
 ```
-{short_summary}
+{self.short_summary}
 ```
 
 ## Entire diff
 
 ```diff
-{file_diff}
+{self.file_diff}
 ```
 
 ## Diff being commented on
 
 ```diff
-{diff}
+{self.diff}
 ```
 
 ## Instructions
@@ -270,22 +334,12 @@ In your reply, please make sure to begin the reply by tagging the user with "@us
 ## Comment chain (including the new comment)
 
 ```
-{comment_chain}
+{self.comment_chain}
 ```
 
 ## The comment/request that you need to directly reply to
 
 ```
-{comment}
+{self.comment}
 ```
 ''' # noqa[E501]
-
-    @classmethod
-    def summalize_type_diff(cls, title, description, file_diff):
-        return cls.SUMMALIZE_TYPE_DIFF.format(
-            title=title,
-            description=description,
-            file_diff=file_diff,
-        )
-
-
