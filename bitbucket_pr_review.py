@@ -12,6 +12,7 @@ import logging
 from dotenv import load_dotenv
 from litellm import completion
 from prompt import CodeRabbitPrompt
+from pprint import pprint
 
 
 dir_path = os.path.dirname(os.path.abspath("__file__"))
@@ -22,6 +23,8 @@ AI_MODEL = 'gemini/gemini-pro'
 
 prompt = CodeRabbitPrompt()
 
+level = logging.ERROR
+
 # --------------------------------
 # 1.loggerの設定
 # --------------------------------
@@ -29,7 +32,7 @@ prompt = CodeRabbitPrompt()
 logger = logging.getLogger(__name__)
 
 # loggerのログレベル設定(ハンドラに渡すエラーメッセージのレベル)
-logger.setLevel(logging.INFO)
+logger.setLevel(level)
 
 # --------------------------------
 # 2.handlerの設定
@@ -38,10 +41,10 @@ logger.setLevel(logging.INFO)
 stream_handler = logging.StreamHandler()
 
 # handlerのログレベル設定(ハンドラが出力するエラーメッセージのレベル)
-stream_handler.setLevel(logging.INFO)
+stream_handler.setLevel(level)
 
 # ログ出力フォーマット設定
-handler_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')  # noqa: E501
 stream_handler.setFormatter(handler_format)
 
 # --------------------------------
@@ -52,6 +55,7 @@ logger.addHandler(stream_handler)
 # --------------------------------
 # ログ出力テスト
 # --------------------------------
+
 
 def main(args):
     bitbucket_url = args.bitbucket_url
@@ -78,76 +82,90 @@ def main(args):
 
     cloud = Cloud(
         username=bitbucket_username,
-        # password=BITBUCKET_PASSWORD,
         token=bitbucket_token,
     )
 
-    repository = cloud.repositories.get(bitbucket_workspace, bitbucket_repository)
+    repository = cloud.repositories.get(bitbucket_workspace, bitbucket_repository)  # noqa: E501
     pr = repository.pullrequests.get(bitbucket_pr_id)
 
-    logger.debug(vars(pr))
+    # logger.debug(vars(pr))
     logger.info(f'{pr.title=}')
     logger.info(f'{pr.description=}')
     logger.info(f'{pr.diff()=}')
     logger.info(f'{pr.diffstat()=}')
 
+    responses = []
+
+    messages = [
+        {
+            "role": "system",
+            "content": prompt._SYSTEM_MESSAGE['default']
+        },
+        {
+            'role': "user",
+            'content': '',
+        }
+    ]
+
     prompt.title = pr.title
     prompt.description = pr.description
     prompt.diff = pr.diff()
 
-    # prompt = f"""
-    # Please review the following pull request:
-    #
-    # Description:
-    # {description}
-    #
-    # Diff:
-    # {diff}
-    #
-    # Provide a detailed technical review focusing on best practices, potential bugs or issues, security concerns, etc.
-    # """
+    file_diffs = []
+    for diff in pr.diff().split('diff --git'):
+        if diff.strip():
+            file_diffs.append(f'diff --git{diff}')
 
-    # summalize_type_diff = PROMPTS.summalize_type_diff(title, description, diff)
     print()
     print()
     print()
     print()
-    print()
-    print()
-    print()
-    print()
-    print()
-    print(prompt.title)
-    print()
-    print()
-    content = prompt.summalize_type_diff
-    print(content)
-    return 0
-    # content += '''
-    # Please write in Japanese.
-    # '''
-    # messages = {
-    #     'system_message': PROMPTS.SYSTEM_MESSAGE['default'],
-    #     'content': prompt,
-    # }
-    # messages=[{"role": "user", "content": prompt}]
+    for index, diffstat in enumerate(pr.diffstat()):
+        print('8' * 100)
+        # print('diffstat')
+        # print(diffstat)
+        # pprint(diffstat.new.__dir__())
+        # print()
+        # print()
+        prompt.filename = diffstat.new.escaped_path
+        link = diffstat.new.get_link('self')
+        file_diff = file_diffs[index]
+        # print(f'{index=}')
+        # print(f'{prompt.filename=}')
+        # print(f'{link=}')
+        # print('file_diff')
+        # pprint(file_diff)
+        # print()
+        prompt.file_diff = file_diff
+        # print('WE ARE SAPPORO!')
+        messages[1]['content'] = f'{prompt.summarize_file_diff}'
+        print('************* messages **********')
+        print(messages[1]['content'])
+        # logger.info(f'{messages=}')
 
-    messages = [
-      {
-        "role": "system",
-        "content": prompt.SYSTEM_MESSAGE['default']
-      },
-      {
-        "role": "user",
-        "content": content,
-      }
-    ]
+        response = completion(model=AI_MODEL, messages=messages)
+        content = response.get('choices', [{}])[0].get('message', {}).get('content')
+        print('************* response **********')
+        print(response)
+        prompt.short_summary = content
+        messages[1]['content'] = f'{prompt.review_file_diff}\nin Japanese'
+        print('************* messages **********')
+        print(messages[1]['content'])
+        # logger.info(f'{messages=}')
+        response = completion(model=AI_MODEL, messages=messages)
+        print('************* response **********')
+        print(response)
+        content = response.get('choices', [{}])[0].get('message', {}).get('content')
+        responses.append(content)
 
-    logger.info(f'{messages=}')
 
-    response = completion(model=AI_MODEL, messages=messages)
-    content = response.get('choices', [{}])[0].get('message', {}).get('content')
-    print(content)
+    print()
+    print()
+    print()
+    print(responses)
+    print()
+    for res in responses:
+        print(res)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ class BasePrompt:
     _SYSTEM_MESSAGE = {}
     _SUMMARIZE = {}
     _SUMMARIZE_RELEASE_NOTES = {}
-    _SUMMALIZE_TYPE_DIFF = ''
+    _SUMMARIZE_FILE_DIFF = ''
     _TRIAGE_FILE_DIFF = ''
     _SUMMARIZE_CHANGESETS = ''
     _SUMMARIZE_PREFIX = ''
@@ -13,31 +13,28 @@ class BasePrompt:
 
     def __format(self, template):
         replaces = {key: value for key, value in self.__dict__.items()}
-        print(replaces)
         return template.format(**replaces)
         # return '\n'.join([eval(f"f'{row}'") for row in template.split('\n')])
 
     @property
-    def summalize_type_diff(self):
-        print(self._SUMMALIZE_TYPE_DIFF)
-        title = 'hoge'
-        return self.__format(self._SUMMALIZE_TYPE_DIFF)
-
-    @property
-    def triage_file_diff(self):
-        return self.__format(self._TRIAGE_FILE_DIFF)
+    def summarize_file_diff(self):
+        return self.__format(self._SUMMARIZE_FILE_DIFF + self._TRIAGE_FILE_DIFF)  # noqa: E501
 
     @property
     def summarize_changesets(self):
         return self.__format(self._SUMMARIZE_CHANGESETS)
 
     @property
-    def summarize_prefix(self):
-        return self.__format(self._SUMMARIZE_PREFIX)
+    def summarize(self):
+        return self.__format(self._SUMMARIZE_PREFIX + self._SUMMARIZE)
 
     @property
     def summarize_short(self):
-        return self.__format(self._SUMMARIZE_SHORT)
+        return self.__format(self._SUMMARIZE_PREFIX + self._SUMMARIZE_SHORT)
+
+    @property
+    def summarize_release_notes(self):
+        return self.__format(self._SUMMARIZE_PREFIX + self._SUMMARIZE_RELEASE_NOTES)  # noqa: E501
 
     @property
     def review_file_diff(self):
@@ -49,10 +46,15 @@ class BasePrompt:
 
 
 class CodeRabbitPrompt(BasePrompt):
+    # PRタイトル
     title = ''
+    # PR説明
     description = ''
+    # ファイルの差分
     file_diff = ''
+    # ファイル変更の要約
     raw_summary = ''
+    # 変更の要約
     short_summary = ''
     patches = ''
     diff = ''
@@ -88,7 +90,7 @@ disregarding minor issues.
     }
 
     # 全体の要約生成プロンプト
-    _SUMMARIZE = {
+    _SUMMARIZE_PROMOPT_PROVIDE = {
         'description': 'The prompt for final summarization response',
         'default': '''
 Provide your final response in markdown with the following content:
@@ -107,7 +109,7 @@ GitHub pull request. Use the titles "Walkthrough" and "Changes" and they must be
     }
 
     # リリースノートの要約生成プロンプト
-    _SUMMARIZE_RELEASE_NOTES = {
+    _SUMMARIZE_RELEASE_NOTES_PROVIDE = {
         'description': 'The prompt for generating release notes in the same chat as summarize stage',  # noqa[E501]
         'default': '''
 Craft concise release notes for the pull request.
@@ -118,8 +120,27 @@ and emphasize features visible to the end-user while omitting code-level details
         '''  # noqa[E501],
     }
 
+    _SUMMARIZE_CHANGESETS = '''
+Provided below are changesets in this pull request. Changesets are in chronlogical order and new changesets are appended to the end of the list. The format consists of filename(s) and the summary of changes for those files. There is a separator between each changeset.
+Your task is to deduplicate and group together files with related/similar changes into a single changeset. Respond with the updated changesets using the same format as the input.
+
+{raw_summary}
+''' # noqa[E501]
+
+    _SUMMARIZE_SHORT = '''
+Your task is to provide a concise summary of the changes. This summary will be used as a prompt while reviewing each file and must be very clear for the AI bot to understand.
+
+Instructions:
+
+- Focus on summarizing only the changes in the PR and stick to the facts.
+- Do not provide any instructions to the bot on how to perform the review.
+- Do not mention that files need a through review or caution about potential issues.
+- Do not mention that these changes affect the logic or functionality of the code.
+- The summary should not exceed 500 words.
+''' # noqa[E501]
+
     # 差分の要約生成プロンプト
-    _SUMMALIZE_TYPE_DIFF = '''
+    _SUMMARIZE_FILE_DIFF = '''
 ## GitHub PR Title
 
 {title}
@@ -163,48 +184,29 @@ Important:
 - Do not mention that these changes affect the logic or functionality of the code in the summary. You must only use the triage status format above to indicate that.
 ''' # noqa[E501]
 
-    _SUMMARIZE_CHANGESETS = '''
-Provided below are changesets in this pull request. Changesets are in chronlogical order and new changesets are appended to the end of the list. The format consists of filename(s) and the summary of changes for those files. There is a separator between each changeset.
-Your task is to deduplicate and group together files with related/similar changes into a single changeset. Respond with the updated changesets using the same format as the input.
-
-{self.raw_summary}
-''' # noqa[E501]
-
     _SUMMARIZE_PREFIX = '''
 Here is the summary of changes you have generated for files:
 ```
-{self.raw_summary}
+{raw_summary}
 ```
     '''
-
-    _SUMMARIZE_SHORT = '''
-Your task is to provide a concise summary of the changes. This summary will be used as a prompt while reviewing each file and must be very clear for the AI bot to understand.
-
-Instructions:
-
-- Focus on summarizing only the changes in the PR and stick to the facts.
-- Do not provide any instructions to the bot on how to perform the review.
-- Do not mention that files need a through review or caution about potential issues.
-- Do not mention that these changes affect the logic or functionality of the code.
-- The summary should not exceed 500 words.
-''' # noqa[E501]
 
     # ファイルの変更のレビュー要求
     _REVIEW_FILE_DIFF = '''
 ## GitHub PR Title
 
-`{self.title}`
+`{title}`
 
 ## Description
 
 ```
-{self.description}
+{description}
 ```
 
 ## Summary of changes
 
 ```
-{self.short_summary}
+{short_summary}
 ```
 
 ## IMPORTANT Instructions
@@ -279,43 +281,43 @@ There's a syntax error in the add function.
 LGTM!
 ---
 
-## Changes made to `{self.filename}` for your review
+## Changes made to `{filename}` for your review
 
-{self.patches}
+{file_diff}
 `
 ''' # noqa[E501]
 
     _COMMENT = '''
 A comment was made on a GitHub PR review for a
-diff hunk on a file - `{self.filename}`. I would like you to follow
+diff hunk on a file - `{filename}`. I would like you to follow
 the instructions in that comment.
 
 ## GitHub PR Title
 
-`{self.title}`
+`{title}`
 
 ## Description
 
 ```
-{self.description}
+{description}
 ```
 
 ## Summary generated by the AI bot
 
 ```
-{self.short_summary}
+{short_summary}
 ```
 
 ## Entire diff
 
 ```diff
-{self.file_diff}
+{file_diff}
 ```
 
 ## Diff being commented on
 
 ```diff
-{self.diff}
+{diff}
 ```
 
 ## Instructions
@@ -334,12 +336,18 @@ In your reply, please make sure to begin the reply by tagging the user with "@us
 ## Comment chain (including the new comment)
 
 ```
-{self.comment_chain}
+{comment_chain}
 ```
 
 ## The comment/request that you need to directly reply to
 
 ```
-{self.comment}
+{comment}
 ```
 ''' # noqa[E501]
+
+
+
+class PRAgentPrompt(BasePrompt):
+    pass
+
