@@ -6,6 +6,7 @@ https://zenn.dev/t_dai
 https://zenn.dev/tadyjp/scraps/a7510f838edf8c
 """
 import argparse
+from copy import deepcopy
 from atlassian.bitbucket import Cloud
 import os
 import logging
@@ -20,6 +21,7 @@ dotenv_path = os.path.join(dir_path, '.env')
 load_dotenv(dotenv_path, verbose=True)
 
 AI_MODEL = 'gemini/gemini-pro'
+# AI_MODEL = 'claude-3-sonnet-20240229'
 
 prompt = prompt_module.MyPrompt()
 
@@ -121,15 +123,11 @@ def main(args):
 
     responses = []
 
-    messages = [
+    default_messages = [
         {
             "role": "system",
             "content": prompt._SYSTEM_MESSAGE['default']
         },
-        {
-            'role': "user",
-            'content': '',
-        }
     ]
 
     prompt.title = pr.title
@@ -142,11 +140,12 @@ def main(args):
             file_diffs.append(f'diff --git{diff}')
 
     for index, diffstat in enumerate(pr.diffstat()):
-        # print('8' * 100)
+        messages = deepcopy(default_messages)
+        print('8' * 100)
         # print('diffstat')
         # print(diffstat)
         # pprint(diffstat.new.__dir__())
-        # print()
+        print(messages)
         # print()
         prompt.filename = diffstat.new.escaped_path
         link = diffstat.new.get_link('self')
@@ -159,24 +158,43 @@ def main(args):
         # print()
         prompt.file_diff = file_diff
         # print('WE ARE SAPPORO!')
-        messages[1]['content'] = f'{prompt.summarize_file_diff}'
+        messages.append(
+            {
+                "role": "user",
+                "content": prompt.summarize_file_diff,
+            }
+        )
         # print('************* messages **********')
         # print(messages[1]['content'])
         # logger.info(f'{messages=}')
 
         response = completion(model=AI_MODEL, messages=messages)
-        content = response.get('choices', [{}])[0].get('message', {}).get('content')
+        print(response)
+        content = response.get('choices', [{}])[-1].get('message', {}).get('content')
         # print('************* response **********')
         # print(content)
         prompt.short_summary = content.split('## Triage:')[0]
         language = 'Please your answer description in Japanese.'
-        messages[1]['content'] = f'{language}\n{prompt.review_file_diff}'
+        messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+            }
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": f'{language}\n{prompt.review_file_diff}',
+            }
+        )
         print('************* messages **********')
-        print(f'{Color.RED}{messages[1]["content"]}{Color.RESET}')
+        print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
         # logger.info(f'{messages=}')
         response = completion(model=AI_MODEL, messages=messages)
+        print(response)
         content = response.get('choices', [{}])[0].get('message', {}).get('content')
         print('************* response **********')
+        print(response.get('choices', [{}]))
         print(f'{Color.GREEN}{content}{Color.RESET}')
         responses.append(content)
 
