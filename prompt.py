@@ -294,6 +294,8 @@ LGTM!
 
 ## Changes made to `{filename}` for your review
 
+{patches}
+
 ''' # noqa[E501]
 
     _COMMENT = '''
@@ -383,9 +385,9 @@ code line 3 that remained unchanged in the PR
 ```
 '''
 
-    @property
-    def review_file_diff(self):
-        return self._format(self._REVIEW_FILE_DIFF + self._GIT_DIFF)
+    # @property
+    # def review_file_diff(self):
+    #     return self._format(self._REVIEW_FILE_DIFF + self._GIT_DIFF)
 
 
 class CodeRabbitPrompt(BasePrompt):
