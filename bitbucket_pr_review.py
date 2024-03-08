@@ -135,9 +135,13 @@ def main(args):
     prompt.diff = pr.diff()
 
     file_diffs = []
-    for diff in pr.diff().split('diff --git'):
+    split = [
+        'diff',
+        '--git',
+    ]
+    for diff in pr.diff().split(' '.join(split)):
         if diff.strip():
-            file_diffs.append(f'diff --git{diff}')
+            file_diffs.append(f'{" ".join(split)}{diff}')
 
     for index, diffstat in enumerate(pr.diffstat()):
         messages = deepcopy(default_messages)
