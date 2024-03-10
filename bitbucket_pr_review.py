@@ -128,7 +128,7 @@ def parse_patch(p):
 def cleaned_patch(patch):
     regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
 
-    pattern = ' '.join(['diff', '--git '])
+    pattern = ' '.join(['diff', '--git', 'a/'])
     diffs = []
     for diff in patch.split(pattern):
         # patchを"diff --git "（ファイルごと）で分割
@@ -255,8 +255,8 @@ Please review this change.
             }
         )
         print(f'filename={prompt.filename}')
-        print('************* messages **********')
-        print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
+        # print('************* messages **********')
+        # print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
 
         response = completion(model=AI_MODEL, messages=messages)
         content = response.get('choices', [{}])[-1].get('message', {}).get('content')
