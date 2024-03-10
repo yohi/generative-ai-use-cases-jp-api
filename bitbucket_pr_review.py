@@ -86,170 +86,6 @@ class Color:
     BG_DEFAULT = '\033[49m'  # 背景色をデフォルトに戻す
     RESET = '\033[0m'   # 全てリセット
 
-
-PATCH = '''
-diff --git a/django/project/apps/notification/migrations/0001_initial.py b/django/project/apps/notification/migrations/0001_initial.py
-index 6a1895d7c..d1d57d65a 100644
---- a/django/project/apps/notification/migrations/0001_initial.py
-+++ b/django/project/apps/notification/migrations/0001_initial.py
-@@ -125,7 +125,7 @@ class Migration(migrations.Migration):
-             True: CREATE TABLE が必要
-             False: CREATE TABLE が不要（この操作はスキップされます。）
-         """
--        print(f'operation.name={operation.name}  exists_table_names={exists_table_names}')
-+        # print(f'operation.name={operation.name}  exists_table_names={exists_table_names}')
-         if operation.name == 'News':
-             return 'news' not in exists_table_names
- 
-diff --git a/django/project/config/settings/project.py b/django/project/config/settings/project.py
-index 3875766db..359cde8f5 100644
---- a/django/project/config/settings/project.py
-+++ b/django/project/config/settings/project.py
-@@ -315,3 +315,6 @@ TEST_RUNNER = 'django_utility.tests.runner.stacked_context_test_runner.StackedCo
- StackedContextTestRunner.set_contexts({
-     'n_plus_one': {},
- })
-+
-+# 引当可能数計算のストアドファンクションで1回に処理するSKU数の上限値
-+BULK_STORED_FUNCTION_MAX_SKU_LIMIT = env.int('BULK_STORED_FUNCTION_MAX_SKU_LIMIT', default=1000)
-diff --git a/django/project/services/allocable_quantity_calculation.py b/django/project/services/allocable_quantity_calculation.py
-index d6bd79673..d7a9bb730 100644
---- a/django/project/services/allocable_quantity_calculation.py
-+++ b/django/project/services/allocable_quantity_calculation.py
-@@ -6,6 +6,7 @@ Todo:
- """
- import datetime
- import logging
-+import math
- import typing
- import uuid
- from collections.abc import Sequence
-@@ -14,6 +15,7 @@ from functools import cache
- 
- import jpholiday
- import polars as pl
-+from django.conf import settings
- from django.db import connections
- from django.db.models import QuerySet
- from django.utils import timezone
-@@ -1293,16 +1295,34 @@ class StoredAllocableQuantityCalculationService(BaseAllocableQuantityCalculation
-         # CalculateTypeで宣言されているキー要素を取得
-         keys = CalculateType.__annotations__.keys()
- 
--        results = cls.__bulk_calculate_via_stored(
--            shop_id,
--            product_sku_ids,
--            stock_types,
--            rounding_unit,
--            round_by_product_sku,
--            mapping_rule,
--        )
-+        # 1ストアドファンクションに対して実行すSKUの上限値
-+        bulk_calculate_limit = settings.BULK_STORED_FUNCTION_MAX_SKU_LIMIT
-+
-+        # product_sku_idsの個数とBULK_CALCULATE_LIMITからrange_stopを算出（小数点切り上げ）
-+        range_stop: int = math.ceil(len(product_sku_ids) / bulk_calculate_limit)
-+
-+        results = []
-+
-+        for i in range(range_stop):
-+            # BULK_CALCULATE_LIMIT文だけ引当可能数を算出する
-+            start = i * bulk_calculate_limit
-+            stop = start + bulk_calculate_limit
-+            product_sku_ids_chunk: list[int] = product_sku_ids[start:stop]
-+            stock_types_chunk: list[int] = stock_types[start:stop]
-+
-+            results += cls.__bulk_calculate_via_stored(
-+                shop_id,
-+                product_sku_ids_chunk,
-+                stock_types_chunk,
-+                rounding_unit,
-+                round_by_product_sku,
-+                mapping_rule,
-+            )
-+
-+        # キー結合したあとでkey_codeとlocation_codeでソートする
-+        ret = sorted([dict(zip(keys, result)) for result in results], key=lambda x: (x['key_code'], x['location_code']))
- 
--        return [dict(zip(keys, result)) for result in results]
-+        return ret
- 
-     @classmethod
-     def __calculate_via_stored(
-diff --git a/django/project/tests/batch/execute/test_send_stock.py b/django/project/tests/batch/execute/test_send_stock.py
-index 03b6ff78e..e584a1f82 100644
---- a/django/project/tests/batch/execute/test_send_stock.py
-+++ b/django/project/tests/batch/execute/test_send_stock.py
-@@ -14,6 +14,7 @@ from django.conf import settings
- from django.core.management import call_command
- from django.core.management.base import CommandError
- from django.db import DatabaseError
-+from django.test import override_settings
- from django.utils import timezone
- from django.utils.timezone import datetime
- 
-@@ -1516,6 +1517,58 @@ class TestSendStock(AlertAssertionMixin, ScsBatchTenantTestCase):
-                 # ローカルでテスト実施する時のみコメント解除する
-                 # self.assertBackUp('milk_amzfs_send_stock_20210202200000.csv')
- 
-+    def test_23_01_limit_5(self) -> None:
-+        """
-+        ファイル作成処理1
-+
-+        ディシジョンテーブルNo23_1
-+
-+        ストアドファンクションが分割されるように上限を5に上書き
-+        ストアド実行回数: 1, 最後に実行される対象数が上限より少ない
-+        """
-+        with override_settings(BULK_STORED_FUNCTION_MAX_SKU_LIMIT=5):
-+            # ストアドファンクションが分割されるように上限を5に上書き
-+            self.test_23_01()
-+
-+    def test_23_01_limit_3(self) -> None:
-+        """
-+        ファイル作成処理1
-+
-+        ディシジョンテーブルNo23_1
-+
-+        ストアドファンクションが分割されるように上限を3に上書き
-+        ストアド実行回数: 2, 最後に実行される対象数が1
-+        """
-+        with override_settings(BULK_STORED_FUNCTION_MAX_SKU_LIMIT=3):
-+            # ストアドファンクションが分割されるように上限を3に上書き
-+            self.test_23_01()
-+
-+    def test_23_01_limit_2(self) -> None:
-+        """
-+        ファイル作成処理1
-+
-+        ディシジョンテーブルNo23_1
-+
-+        ストアドファンクションが分割されるように上限を2に上書き
-+        ストアド実行回数: 2, 最後に実行される対象数が上限と同じ
-+        """
-+        with override_settings(BULK_STORED_FUNCTION_MAX_SKU_LIMIT=2):
-+            # ストアドファンクションが分割されるように上限を2に上書き
-+            self.test_23_01()
-+
-+    def test_23_01_limit_1(self) -> None:
-+        """
-+        ファイル作成処理1
-+
-+        ディシジョンテーブルNo23_1
-+
-+        ストアドファンクションが分割されるように上限を1に上書き
-+        ストアド実行回数: 3以上（4）, 最後に実行される対象数が1（上限と同じ）
-+        """
-+        with override_settings(BULK_STORED_FUNCTION_MAX_SKU_LIMIT=1):
-+            # ストアドファンクションが分割されるように上限を1に上書き
-+            self.test_23_01()
-+
-     def test_23_02(self) -> None:
-         """
-         ファイル作成処理2
-
-'''  # noqa: E501, W293
-
 def parse_patch(p):
     # TODO
     old_hunk_lines = [
@@ -260,6 +96,14 @@ def parse_patch(p):
     new_line = p['new_hunk']['start_line']
     lines = p['patch'].split('\n')
 
+    if lines[-1] == '':
+        # 最終行が空行の場合は削除
+        lines.pop()
+
+    # 前後の注釈をスキップする行数
+    skip_start = 3
+    skip_end = 3
+
     remove_only = not [line for line in lines if line.startswith('+')]
 
     for current_line, line in enumerate(lines):
@@ -269,12 +113,12 @@ def parse_patch(p):
             new_hunk_lines.append(f'{new_line}: {line[1:]}')
             new_line += 1
         else:
-            # old_hunk_lines.append(line)
-            # new_hunk_lines.append(line)
-            new_hunk_lines.append(f'{new_line}: {line[1:]}')
+            old_hunk_lines.append(line)
+            if remove_only or (current_line > skip_start and current_line <= len(lines) - skip_end):
+                new_hunk_lines.append(f'{new_line}: {line}')
+            else:
+                new_hunk_lines.append(f'{line}')
             new_line += 1
-    # print('remove_only')
-    # print(remove_only)
 
     return {
         'old_hunk': '\n'.join(old_hunk_lines),
@@ -282,7 +126,6 @@ def parse_patch(p):
     }
 
 def cleaned_patch(patch):
-    # patch = PATCH
     regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
 
     pattern = ' '.join(['diff', '--git '])
@@ -293,6 +136,9 @@ def cleaned_patch(patch):
             continue
         patches = []
         iter = reversed(list(re.finditer(regex, diff, re.MULTILINE)))
+        _dict = {
+            'diff': diff
+        }
         for p in iter:
             match, old_begin, old_diff, new_begin, new_diff = p.groups()
             # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
@@ -310,13 +156,18 @@ def cleaned_patch(patch):
                     'end_line': int(new_begin) + int(new_diff) - 1,
                 }
             })
-        diffs.append(reversed(patches))
+        _dict['patches'] = reversed(patches)
+        diffs.append(_dict)
 
     ret = []
     for d in diffs:
-        for p in d:
-            ret.append(parse_patch(p))
-
+        hunks = []
+        for p in d['patches']:
+            hunks.append(parse_patch(p))
+        ret.append({
+            'diff': d['diff'],
+            'hunks': hunks
+        })
     return ret
 
 
@@ -363,55 +214,39 @@ def main(args):
     prompt.title = pr.title
     prompt.description = pr.description
     patch = pr.diff()
-    prompt.diff = patch
+    # prompt.diff = patch
 
     file_diffs = cleaned_patch(patch)
 
-    hunk_str = ''
 
-    for file_diff in file_diffs:
+    for index, diffstat in enumerate(pr.diffstat()):
 
-        hunk_str += f'''
+        messages = deepcopy(default_messages)
+        prompt.filename = diffstat.new.escaped_path
+        link = diffstat.new.get_link('self')
+        file_diff = file_diffs[index]
+        prompt.diff = file_diff['diff']
+        hunk_str = ''
+        for hunk in file_diff['hunks']:
+            hunk_str += f'''
 ---new_hunk---
 ```
-{file_diff["new_hunk"]}
+{hunk["new_hunk"]}
 ```
 
 ---old_hunk---
 ```
-{file_diff["old_hunk"]}
+{hunk["old_hunk"]}
 ```
+
+---comment_chains---
+```
+Please review this change.
+```
+
+---end_change_section---
 '''
-    prompt.file_diff = patch
-    prompt.patches = hunk_str
-
-    file_diffs = []
-    print(f'{Color.RED}{prompt.summarize_file_diff}{Color.RESET}')
-    prompt.short_summary = 'consadole'
-    prompt.filename = 'sapporo'
-    print(f'{Color.YELLOW}{prompt.review_file_diff}{Color.RESET}')
-    return 0
-
-
-    for index, diffstat in enumerate(pr.diffstat()):
-        messages = deepcopy(default_messages)
-        print('8' * 100)
-        # print('diffstat')
-        # print(diffstat)
-        # pprint(diffstat.new.__dir__())
-        print(messages)
-        # print()
-        prompt.filename = diffstat.new.escaped_path
-        link = diffstat.new.get_link('self')
-        file_diff = file_diffs[index]
-        # print(f'{index=}')
-        # print(f'{prompt.filename=}')
-        # print(f'{link=}')
-        # print('file_diff')
-        # pprint(file_diff)
-        # print()
-        prompt.file_diff = file_diff
-        # print('WE ARE SAPPORO!')
+        prompt.patches = hunk_str
 
         messages.append(
             {
@@ -419,6 +254,7 @@ def main(args):
                 "content": prompt.summarize_file_diff,
             }
         )
+        print(f'filename={prompt.filename}')
         print('************* messages **********')
         print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
 
@@ -428,31 +264,36 @@ def main(args):
         print('************* response **********')
         print(f'{Color.GREEN}{content}{Color.RESET}')
 
-        prompt.short_summary = content.split('## Triage:')[0]
-        language = 'Please your answer description in Japanese.'
-        messages.append(
-            {
-                "role": "assistant",
-                "content": content,
-            }
-        )
-        messages.append(
-            {
-                "role": "user",
-                "content": f'{language}\n{prompt.review_file_diff}',
-            }
-        )
+        triage_regex = r"\[TRIAGE\]:\s*(NEEDS_REVIEW|APPROVED)"
+        triage_match = re.search(triage_regex, content, re.MULTILINE)
+        needs_review = True
+        if triage_match:
+            triage = triage_match.group(1)
+            needs_review = triage == 'NEEDS_REVIEW'
 
-        print('************* messages **********')
-        print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
+        if needs_review:
+            summary = re.sub(r"^.*triage.*$", '', content, 0, re.MULTILINE | re.IGNORECASE)
 
-        response = completion(model=AI_MODEL, messages=messages)
-        content = response.get('choices', [{}])[0].get('message', {}).get('content')
+            prompt.short_summary = summary
+            language = ''
+            messages = deepcopy(default_messages)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f'{language}\n{prompt.review_file_diff}',
+                }
+            )
 
-        print('************* response **********')
-        print(f'{Color.BLUE}{content}{Color.RESET}')
+            # print('************* messages **********')
+            # print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
 
-        responses.append(content)
+            response = completion(model=AI_MODEL, messages=messages)
+            content = response.get('choices', [{}])[0].get('message', {}).get('content')
+
+            print('************* response **********')
+            print(f'{Color.BLUE}{content}{Color.RESET}')
+
+            responses.append(content)
 
 
 if __name__ == "__main__":

@@ -80,6 +80,8 @@ You are `@coderabbitai` (aka `github-actions[bot]`), a language model trained by
   - Best practices: DRY, SOLID, KISS
 
 Do not comment on minor code style issues, missing comments/documentation. Identify and resolve significant concerns to improve overall code quality while deliberately disregarding minor issues.
+
+IMPORTANT: Entire response must be in the language with ISO code: ja-JP
         '''  # noqa[E501],
     }
 
@@ -154,16 +156,12 @@ code line 3 that remained unchanged in the PR
 
 @@ ... @@ def func2():
 ...
-
-
-## file: 'src/file2.py'
-...
 ```
 
 ### The Pull Request Diff
 
 ```diff
-{file_diff}
+{diff}
 ```
 
 ## Instructions
@@ -356,38 +354,6 @@ In your reply, please make sure to begin the reply by tagging the user with "@us
 {comment}
 ```
 ''' # noqa[E501]
-
-    _GIT_DIFF = '''
-### Example Pull Request Diff
-
-``` diff
-## file: 'src/file1.py'
-
-@@ -12,5 +12,5 @@ def func1():
-code line 1 that remained unchanged in the PR
-code line 2 that remained unchanged in the PR
--code line that was removed in the PR
-+code line added in the PR
-code line 3 that remained unchanged in the PR
-
-@@ ... @@ def func2():
-...
-
-
-## file: 'src/file2.py'
-...
-```
-
-### The Pull Request Diff
-
-```diff
-{file_diff}
-```
-'''
-
-    # @property
-    # def review_file_diff(self):
-    #     return self._format(self._REVIEW_FILE_DIFF + self._GIT_DIFF)
 
 
 class CodeRabbitPrompt(BasePrompt):
