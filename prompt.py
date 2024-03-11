@@ -153,9 +153,6 @@ code line 2 that remained unchanged in the PR
 -code line that was removed in the PR
 +code line added in the PR
 code line 3 that remained unchanged in the PR
-
-@@ ... @@ def func2():
-...
 ```
 
 ### The Pull Request Diff

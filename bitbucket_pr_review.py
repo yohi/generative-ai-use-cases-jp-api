@@ -22,8 +22,9 @@ dir_path = os.path.dirname(os.path.abspath("__file__"))
 dotenv_path = os.path.join(dir_path, '.env')
 load_dotenv(dotenv_path, verbose=True)
 
-AI_MODEL = 'gemini/gemini-pro'
+# AI_MODEL = 'gemini/gemini-pro'
 # AI_MODEL = 'claude-3-sonnet-20240229'
+AI_MODEL = 'bedrock/anthropic.claude-3-sonnet-20240229-v1:0'
 
 prompt = prompt_module.MyPrompt()
 
@@ -86,6 +87,77 @@ class Color:
     BG_DEFAULT = '\033[49m'  # 背景色をデフォルトに戻す
     RESET = '\033[0m'   # 全てリセット
 
+
+def cleaned_patch(diff_patch, pr):
+    """
+
+    [
+        {
+            "filename": "src/main/java/com/example/demo/HelloController.java",
+            "link": "https://bitbucket.org/.../src/main/java/com/example/demo/HelloController.java",
+            "filediff": "",
+            "patches": [
+                {
+                    "patch": "",
+                    "hunks": 
+                    "old_hunk": {
+                        "start_line": 1,
+                        "end_line": 1
+                    },
+                    "new_hunk": {
+                        "start_line": 1,
+                        "end_line": 1
+                    }
+                }
+            ]
+        }
+
+    ]
+    """
+    file_split_pattern = ' '.join(['diff', '--git', 'a/'])
+    patch_split_regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
+
+    # print(diff_patch)
+    # patchを"diff --git "（ファイルごと）で分割
+    diff_patches = diff_patch.split(file_split_pattern)[1:]
+
+    files = []
+    for index, diffstat in enumerate(pr.diffstat()):
+        filediff = diff_patches[index]
+        filename = diffstat.new.escaped_path
+        link = diffstat.new.get_link('self')
+
+        patches = []
+        iter = reversed(list(re.finditer(patch_split_regex, filediff, re.MULTILINE)))
+        _dict = {
+            'filename': filename,
+            'link': link,
+            'filediff': filediff,
+        }
+        for m in iter:
+            match, old_begin, old_diff, new_begin, new_diff = m.groups()
+            # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
+            index = filediff.rindex(match)
+            patch = filediff[index + len(match):]
+            filediff = filediff[:index]
+            patch = {
+                'patch': patch,
+                'old_hunk_line': {
+                    'start_line': int(old_begin),
+                    'end_line': int(old_begin) + int(old_diff) - 1,
+                },
+                'new_hunk_line': {
+                    'start_line': int(new_begin),
+                    'end_line': int(new_begin) + int(new_diff) - 1,
+                }
+            }
+            patches.append(parse_patch(patch))
+        _dict['patches'] = list(reversed(patches))
+        files.append(_dict)
+
+    return files
+
+
 def parse_patch(p):
     # TODO
     old_hunk_lines = [
@@ -93,7 +165,7 @@ def parse_patch(p):
     new_hunk_lines = [
     ]
 
-    new_line = p['new_hunk']['start_line']
+    new_line = p['new_hunk_line']['start_line']
     lines = p['patch'].split('\n')
 
     if lines[-1] == '':
@@ -120,55 +192,55 @@ def parse_patch(p):
                 new_hunk_lines.append(f'{line}')
             new_line += 1
 
-    return {
+    return p | {
         'old_hunk': '\n'.join(old_hunk_lines),
         'new_hunk': '\n'.join(new_hunk_lines)
     }
 
-def cleaned_patch(patch):
-    regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
-
-    pattern = ' '.join(['diff', '--git', 'a/'])
-    diffs = []
-    for diff in patch.split(pattern):
-        # patchを"diff --git "（ファイルごと）で分割
-        if not diff.split():
-            continue
-        patches = []
-        iter = reversed(list(re.finditer(regex, diff, re.MULTILINE)))
-        _dict = {
-            'diff': diff
-        }
-        for p in iter:
-            match, old_begin, old_diff, new_begin, new_diff = p.groups()
-            # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
-            index = diff.rindex(match)
-            patch = diff[index + len(match):]
-            diff = diff[:index]
-            patches.append({
-                'patch': patch,
-                'old_hunk': {
-                    'start_line': int(old_begin),
-                    'end_line': int(old_begin) + int(old_diff) - 1,
-                },
-                'new_hunk': {
-                    'start_line': int(new_begin),
-                    'end_line': int(new_begin) + int(new_diff) - 1,
-                }
-            })
-        _dict['patches'] = reversed(patches)
-        diffs.append(_dict)
-
-    ret = []
-    for d in diffs:
-        hunks = []
-        for p in d['patches']:
-            hunks.append(parse_patch(p))
-        ret.append({
-            'diff': d['diff'],
-            'hunks': hunks
-        })
-    return ret
+# def cleaned_patch(patch):
+#     regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
+# 
+#     pattern = ' '.join(['diff', '--git', 'a/'])
+#     diffs = []
+#     for diff in patch.split(pattern):
+#         # patchを"diff --git "（ファイルごと）で分割
+#         if not diff.split():
+#             continue
+#         patches = []
+#         iter = reversed(list(re.finditer(regex, diff, re.MULTILINE)))
+#         _dict = {
+#             'diff': diff
+#         }
+#         for p in iter:
+#             match, old_begin, old_diff, new_begin, new_diff = p.groups()
+#             # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
+#             index = diff.rindex(match)
+#             patch = diff[index + len(match):]
+#             diff = diff[:index]
+#             patches.append({
+#                 'patch': patch,
+#                 'old_hunk': {
+#                     'start_line': int(old_begin),
+#                     'end_line': int(old_begin) + int(old_diff) - 1,
+#                 },
+#                 'new_hunk': {
+#                     'start_line': int(new_begin),
+#                     'end_line': int(new_begin) + int(new_diff) - 1,
+#                 }
+#             })
+#         _dict['patches'] = reversed(patches)
+#         diffs.append(_dict)
+# 
+#     ret = []
+#     for d in diffs:
+#         hunks = []
+#         for p in d['patches']:
+#             hunks.append(parse_patch(p))
+#         ret.append({
+#             'diff': d['diff'],
+#             'hunks': hunks
+#         })
+#     return ret
 
 
 def main(args):
@@ -204,65 +276,52 @@ def main(args):
 
     responses = []
 
-    default_messages = [
-        {
-            "role": "system",
-            "content": prompt._SYSTEM_MESSAGE['default']
-        },
-    ]
+    system_messages = {
+        "role": "system",
+        "content": prompt._SYSTEM_MESSAGE['default']
+    }
 
+    # PRのタイトル
     prompt.title = pr.title
+    # PRの説明
     prompt.description = pr.description
-    patch = pr.diff()
-    # prompt.diff = patch
+    # PRのdiffpatch
+    diff_patch = pr.diff()
 
-    file_diffs = cleaned_patch(patch)
-
-
-    for index, diffstat in enumerate(pr.diffstat()):
-
-        messages = deepcopy(default_messages)
-        prompt.filename = diffstat.new.escaped_path
-        link = diffstat.new.get_link('self')
-        file_diff = file_diffs[index]
-        prompt.diff = file_diff['diff']
-        hunk_str = ''
-        for hunk in file_diff['hunks']:
-            hunk_str += f'''
+    files = cleaned_patch(diff_patch, pr)
+    for file in files:
+        prompt.filename = file['filename']
+        prompt.link = file['link']
+        # prompt.filediff = file['filediff']
+        prompt.diff = file['filediff']
+        hunks = []
+        for patch in file['patches']:
+            hunks.append(f'''
 ---new_hunk---
 ```
-{hunk["new_hunk"]}
+{patch["new_hunk"]}
 ```
 
 ---old_hunk---
 ```
-{hunk["old_hunk"]}
+{patch["old_hunk"]}
 ```
-
----comment_chains---
-```
-Please review this change.
-```
-
----end_change_section---
-'''
-        prompt.patches = hunk_str
-
+        ''')
+        prompt.patches = '\n'.join(hunks)
+        messages = [
+            system_messages
+        ]
         messages.append(
             {
                 "role": "user",
                 "content": prompt.summarize_file_diff,
             }
         )
-        print(f'filename={prompt.filename}')
-        # print('************* messages **********')
-        # print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
-
         response = completion(model=AI_MODEL, messages=messages)
         content = response.get('choices', [{}])[-1].get('message', {}).get('content')
-
         print('************* response **********')
         print(f'{Color.GREEN}{content}{Color.RESET}')
+        responses.append(content)
 
         triage_regex = r"\[TRIAGE\]:\s*(NEEDS_REVIEW|APPROVED)"
         triage_match = re.search(triage_regex, content, re.MULTILINE)
@@ -272,11 +331,13 @@ Please review this change.
             needs_review = triage == 'NEEDS_REVIEW'
 
         if needs_review:
-            summary = re.sub(r"^.*triage.*$", '', content, 0, re.MULTILINE | re.IGNORECASE)
+            summary = re.sub(r"^.*triage.*$", '', content, 0, re.MULTILINE | re.IGNORECASE).strip()
 
             prompt.short_summary = summary
             language = ''
-            messages = deepcopy(default_messages)
+            messages = [
+                system_messages
+            ]
             messages.append(
                 {
                     "role": "user",
@@ -289,11 +350,65 @@ Please review this change.
 
             response = completion(model=AI_MODEL, messages=messages)
             content = response.get('choices', [{}])[0].get('message', {}).get('content')
-
             print('************* response **********')
             print(f'{Color.BLUE}{content}{Color.RESET}')
 
-            responses.append(content)
+#             # sanitize_response
+#             content = sanitize_code_brock(content,  'suggestion')
+#             content = sanitize_code_brock(content,  'diff')
+# 
+#             lines = content.split('\n')
+#             line_number_range_regex = r"(?:^|\s)(\d+)-(\d+):\s*$"
+#             comment_separator = '---'
+# 
+#             for line in lines:
+#                 line_number_range_match = re.match(line_number_range_regex, line)
+#                 print(line_number_range_match)
+#                 if line_number_range_match:
+#                     current_start_line = int(line_number_range_match.group(1))
+#                     current_end_line = int(line_number_range_match.group(2))
+#                     current_comment = ''
+#                     store_review(file['patches'], current_start_line, current_end_line, current_comment)
+#             print('************* response **********')
+#             print(f'{Color.YELLOW}{content}{Color.RESET}')
+#             responses.append(content)
+
+def store_review(patches, start_line, end_line, comment):
+    within_patch = False
+    best_batch_start_line = -1
+    best_batch_end_line = -1
+    max_intersection = 0
+
+    print('okamura daihachi')
+    print(patches)
+    for patch in patches[start_line:end_line]:
+        intersection = max(0, min(patch_end_line, end_line) - max(patch_start_line, start_line))
+        if intersection > max_intersection:
+            within_patch = True
+            max_intersection = intersection
+            best_batch_start_line = patch_start_line
+            best_batch_end_line = patch_end_line
+
+
+
+def sanitize_code_brock(comment, code_block_label):
+    code_block_start = f'```{code_block_label}'
+    line_number_regex = r"^ *(\d+):"
+    code_block_end = '```'
+    code_block_start_index = comment.find(code_block_start)
+    while code_block_start_index != -1:
+        code_block_end_index = comment.find(code_block_end, code_block_start_index)
+        code_block = comment[code_block_start_index:code_block_end_index]
+        code_block = code_block.replace(code_block_start, '').replace(code_block_end, '').strip()
+
+        sanitized_block = re.sub(line_number_regex, '', code_block)
+
+        comment = comment[:code_block_start_index] + sanitized_block + comment[code_block_end_index:]
+
+        code_block_start_index = comment.find(code_block_start, code_block_start_index) + len(code_block_start + sanitized_block + code_block_end)
+
+    return comment
+
 
 
 if __name__ == "__main__":
