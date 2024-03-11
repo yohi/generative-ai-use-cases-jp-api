@@ -13,9 +13,15 @@ from atlassian.bitbucket import Cloud
 import os
 import logging
 from dotenv import load_dotenv
-from litellm import completion
+from litellm import completion, encode
 from pprint import pprint
 import prompt as prompt_module
+import sentry_sdk
+
+sentry_sdk.init(
+    dsn=os.environ.get('SENTRY_DSN'),
+    enable_tracing=True
+)
 
 
 dir_path = os.path.dirname(os.path.abspath("__file__"))
@@ -290,12 +296,16 @@ def main(args):
 
     files = cleaned_patch(diff_patch, pr)
     for file in files:
-        prompt.filename = file['filename']
-        prompt.link = file['link']
+        patches = file['patches']
+        filename = file['filename']
+        link = file['link']
+        filediff = file['filediff']
+        prompt.filename = filename
+        prompt.link = link
         # prompt.filediff = file['filediff']
-        prompt.diff = file['filediff']
+        prompt.diff = filediff
         hunks = []
-        for patch in file['patches']:
+        for patch in patches:
             hunks.append(f'''
 ---new_hunk---
 ```
@@ -308,6 +318,8 @@ def main(args):
 ```
         ''')
         prompt.patches = '\n'.join(hunks)
+        # patches['hunk'] = '\n'.join(hunks)
+
         messages = [
             system_messages
         ]
@@ -317,6 +329,8 @@ def main(args):
                 "content": prompt.summarize_file_diff,
             }
         )
+
+        print(f'************* filename={prompt.filename} **********')
         response = completion(model=AI_MODEL, messages=messages)
         content = response.get('choices', [{}])[-1].get('message', {}).get('content')
         print('************* response **********')
@@ -352,51 +366,141 @@ def main(args):
             content = response.get('choices', [{}])[0].get('message', {}).get('content')
             print('************* response **********')
             print(f'{Color.BLUE}{content}{Color.RESET}')
+            print(response)
 
-#             # sanitize_response
-#             content = sanitize_code_brock(content,  'suggestion')
-#             content = sanitize_code_brock(content,  'diff')
-# 
-#             lines = content.split('\n')
-#             line_number_range_regex = r"(?:^|\s)(\d+)-(\d+):\s*$"
-#             comment_separator = '---'
-# 
-#             for line in lines:
-#                 line_number_range_match = re.match(line_number_range_regex, line)
-#                 print(line_number_range_match)
-#                 if line_number_range_match:
-#                     current_start_line = int(line_number_range_match.group(1))
-#                     current_end_line = int(line_number_range_match.group(2))
-#                     current_comment = ''
-#                     store_review(file['patches'], current_start_line, current_end_line, current_comment)
-#             print('************* response **********')
-#             print(f'{Color.YELLOW}{content}{Color.RESET}')
-#             responses.append(content)
+            reviews = parse_review(content, patches)
+            # print('parse_review ended!!')
+            # print(reviews)
+            lgtm_count = 0
+            review_count = 0
+            print(f'{len(reviews)=}')
+            for review in reviews:
+                if review['comment'].find('LGTM') > -1 or review['comment'].find('looks good to me') > -1:
+                    lgtm_count += 1
+                    continue
+                review_count += 1
+                review_comment(filename, link, review)
+            print(f'{lgtm_count=}')
+            print(f'{review_count=}')
 
-def store_review(patches, start_line, end_line, comment):
-    within_patch = False
-    best_batch_start_line = -1
-    best_batch_end_line = -1
-    max_intersection = 0
 
-    print('okamura daihachi')
-    print(patches)
-    for patch in patches[start_line:end_line]:
-        intersection = max(0, min(patch_end_line, end_line) - max(patch_start_line, start_line))
-        if intersection > max_intersection:
-            within_patch = True
-            max_intersection = intersection
-            best_batch_start_line = patch_start_line
-            best_batch_end_line = patch_end_line
+def review_comment(filename, link, review):
+    start_line = review['start_line']
+    end_line = review['end_line']
+    comment = review['comment']
+    print(f'''{Color.YELLOW}
+    {filename=}
+    {link=}
+    {start_line=}
+    {end_line=}
+    {comment=}
+    {Color.RESET}''')
 
+
+def parse_review(content, patches):
+    # print('parse_review')
+    reviews = []
+    content = saniteze_response(content.strip())
+
+    lines = content.split('\n')
+    line_number_range_regex = r"(?:^|\s)(\d+)-(\d+):\s*$"
+    comment_separator = '---'
+
+    def store_review(current_start_line, current_end_line, current_comment):
+        # print('store_review')
+        if current_start_line is not None and current_end_line is not None:
+            review = {
+                'start_line': current_start_line,
+                'end_line': current_end_line,
+                'comment': current_comment,
+            }
+
+            within_patch = False
+            best_patch_start_line = -1
+            best_patch_end_line = -1
+            max_intersection = 0
+
+            for p in patches:
+                start_line = p['new_hunk_line']['start_line']
+                end_line = p['new_hunk_line']['end_line']
+
+                intersection_start = max(review['start_line'], start_line)
+                intersection_end = min(review['end_line'], end_line)
+                intersection_length = max(0, intersection_end - intersection_start + 1)  # noqa: E501
+
+                if intersection_length > max_intersection:
+                    max_intersection = intersection_length
+                    best_patch_start_line = start_line
+                    best_patch_end_line = end_line
+                    within_patch = (intersection_length == review['end_line'] - review['start_line'] + 1)  # noqa: E501
+
+                if within_patch:
+                    break
+
+            if not within_patch:
+                if best_patch_start_line != -1 and best_patch_end_line != -1:
+                    review = {
+                        'comment':  f'> Note: This review was outside of the patch, so it was mapped to the patch with the greatest overlap. Original lines [{review["start_line"]}-{review["end_line"]}]\n\n{review["comment"]}',  # noqa: E501
+                        'start_line': best_patch_start_line,
+                        'end_line': best_patch_end_line,
+                    }
+                else:
+                    review = {
+                        'comment': f'> Note: This review was outside of the patch, but no patch was found that overlapped with it. Original lines [{review["start_line"]}-{review["end_line"]}]\n\n{review["comment"]}',  # noqa: E501'
+                        'start_line': patches[0]['new_hunk_line']['start_line'],  # noqa: E501
+                        'end_line': patches[0]['new_hunk_line']['end_line'],
+                    }
+
+            reviews.append(review)
+
+    current_start_line = None
+    current_end_line = None
+    current_comment = ''
+
+    for line in lines:
+        # print(f'{line=}')
+        line_number_range_match = re.match(line_number_range_regex, line)
+
+        if line_number_range_match:
+            store_review(current_start_line, current_end_line, current_comment)
+            current_start_line = int(line_number_range_match.group(1))
+            current_end_line = int(line_number_range_match.group(2))
+            current_comment = ''
+            continue
+
+        if line.strip() == comment_separator:
+            store_review(current_start_line, current_end_line, current_comment)
+            current_start_line = None
+            current_end_line = None
+            current_comment = ''
+            continue
+
+        if current_start_line is not None and current_end_line is not None:
+            current_comment += f'{line}\n'
+
+    store_review(current_start_line, current_end_line, current_comment)
+
+    return reviews
+
+
+def saniteze_response(content):
+    # print('saniteze_response')
+    content = sanitize_code_brock(content,  'suggestion')
+    content = sanitize_code_brock(content,  'diff')
+    return content
 
 
 def sanitize_code_brock(comment, code_block_label):
+    # print(f'sanitize_code_brock {code_block_label=}')
+    # comment = "レビューを行いました。以下の通りです。\n\n2-18:\nLGTM!\n\n19-127:\nリクエストの認証と認可機構、そしてLambda関数の呼び出しのためのヘルパー関数を含んでいます。以下のコメントがあります。\n\n59-60:\n```diff\n- ChallengeResponses=challenge_response,\n+    ChallengeResponses=challenge_response['ChallengeResponses'],```\n`challenge_response`はdictで、`ChallengeResponses`キーに値が含まれています。したがって、キーを明示的に参照する必要があります。\n\n93-99:\nLambdaクライアントの作成時に認証情報を渡すのは、セキュリティ上の懸念があります。代わりに、Lambdaの実行ロールを使用するか、一時的な認証情報を取得すること"  # noqa: E501
+    # code_block_label = 'diff'
+
     code_block_start = f'```{code_block_label}'
     line_number_regex = r"^ *(\d+):"
     code_block_end = '```'
     code_block_start_index = comment.find(code_block_start)
     while code_block_start_index != -1:
+        # print(f'{code_block_start_index=}')
         code_block_end_index = comment.find(code_block_end, code_block_start_index)
         code_block = comment[code_block_start_index:code_block_end_index]
         code_block = code_block.replace(code_block_start, '').replace(code_block_end, '').strip()
@@ -405,10 +509,9 @@ def sanitize_code_brock(comment, code_block_label):
 
         comment = comment[:code_block_start_index] + sanitized_block + comment[code_block_end_index:]
 
-        code_block_start_index = comment.find(code_block_start, code_block_start_index) + len(code_block_start + sanitized_block + code_block_end)
+        code_block_start_index = comment.find(code_block_start, code_block_start_index + len(code_block_start + sanitized_block + code_block_end))
 
     return comment
-
 
 
 if __name__ == "__main__":
