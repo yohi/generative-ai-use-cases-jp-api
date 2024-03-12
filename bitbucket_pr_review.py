@@ -37,7 +37,7 @@ CLAUDE_3 = 'claude-3-sonnet-20240229'
 BEDROCK_CLAUDE_2_1 = 'bedrock/anthropic.claude-v2:1'
 BEDROCK_CLAUDE_3 = 'bedrock/anthropic.claude-3-sonnet-20240229-v1:0'
 
-AI_MODEL = BEDROCK_CLAUDE_2_1
+AI_MODEL = BEDROCK_CLAUDE_3
 
 prompt = prompt_module.MyPrompt()
 
@@ -215,12 +215,13 @@ def parse_patch(p):
 
 
 def chat(user_message, debug, jp=False):
+    ai_model = AI_MODEL
     system_message = {
         "role": "system",
         "content": prompt._SYSTEM_MESSAGE['default']
     }
     if jp:
-        system_message['content'] += 'IMPORTANT: Entire response must be in the language with ISO code: ja-JP'  # noqa: E501
+        system_message['content'] += '\nIMPORTANT: Entire response must be in the language with ISO code: ja-JP'  # noqa: E501
 
     messages = [
         system_message,
@@ -232,8 +233,11 @@ def chat(user_message, debug, jp=False):
         },
     )
 
+    first_messages = deepcopy(messages)
+
     if debug > 2:
         print('************* request *************')
+        print(f'{Color.RED}{messages[0]["content"]}{Color.RESET}')
         print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
 
     finish_reason = None
@@ -245,7 +249,7 @@ def chat(user_message, debug, jp=False):
             print(f'{len(m["content"])=}')
         print('xxxxxx')
         try:
-            response = completion(model=AI_MODEL, messages=messages)
+            response = completion(model=ai_model, messages=messages)
             finish_reason = response.finish_reason
             message = response.get('choices', [{}])[-1].get('message', {})
             messages.append(dict(message))
@@ -253,7 +257,9 @@ def chat(user_message, debug, jp=False):
         except BadRequestError as e:
             print(e)
             finish_reason = 'bad_request'
-            time.sleep(10)
+            ai_model = BEDROCK_CLAUDE_2_1
+            messages = first_messages
+            content = ''
         print(finish_reason)
 
     if debug > 1:

@@ -79,7 +79,7 @@ You are `@coderabbitai` (aka `github-actions[bot]`), a language model trained by
   - Best practices: DRY, SOLID, KISS
 
 Do not comment on minor code style issues, missing comments/documentation. Identify and resolve significant concerns to improve overall code quality while deliberately disregarding minor issues.
-        '''  # noqa[E501],
+'''  # noqa[E501],
     }
 
     # 全体の要約生成プロンプト
