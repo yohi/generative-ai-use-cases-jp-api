@@ -283,6 +283,9 @@ There's a syntax error in the add function.
 24-25:
 LGTM!
 ---
+26-27:
+LGTM!
+---
 
 ## Changes made to `{filename}` for your review
 

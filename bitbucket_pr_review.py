@@ -5,6 +5,8 @@ https://github.com/aws-samples/generative-ai-use-cases-jp/actions/runs/700493817
 https://zenn.dev/t_dai
 https://zenn.dev/tadyjp/scraps/a7510f838edf8c
 """
+import time
+import litellm
 import re
 import argparse
 from copy import deepcopy
@@ -13,7 +15,7 @@ from atlassian.bitbucket import Cloud
 import os
 import logging
 from dotenv import load_dotenv
-from litellm import completion, encode
+from litellm import BadRequestError, completion, encode, get_max_tokens, ContextWindowExceededError, RateLimitError  # noqa: E501
 from pprint import pprint
 import prompt as prompt_module
 import sentry_sdk
@@ -24,13 +26,18 @@ sentry_sdk.init(
 )
 
 
+# litellm.set_verbose = True
+
 dir_path = os.path.dirname(os.path.abspath("__file__"))
 dotenv_path = os.path.join(dir_path, '.env')
 load_dotenv(dotenv_path, verbose=True)
 
-# AI_MODEL = 'gemini/gemini-pro'
-# AI_MODEL = 'claude-3-sonnet-20240229'
-AI_MODEL = 'bedrock/anthropic.claude-3-sonnet-20240229-v1:0'
+GEMINI = 'gemini/gemini-pro'
+CLAUDE_3 = 'claude-3-sonnet-20240229'
+BEDROCK_CLAUDE_2_1 = 'bedrock/anthropic.claude-v2:1'
+BEDROCK_CLAUDE_3 = 'bedrock/anthropic.claude-3-sonnet-20240229-v1:0'
+
+AI_MODEL = BEDROCK_CLAUDE_2_1
 
 prompt = prompt_module.MyPrompt()
 
@@ -123,7 +130,6 @@ def cleaned_patch(diff_patch, pr):
     file_split_pattern = ' '.join(['diff', '--git', 'a/'])
     patch_split_regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
 
-    # print(diff_patch)
     # patchを"diff --git "（ファイルごと）で分割
     diff_patches = diff_patch.split(file_split_pattern)[1:]
 
@@ -174,6 +180,10 @@ def parse_patch(p):
     new_line = p['new_hunk_line']['start_line']
     lines = p['patch'].split('\n')
 
+    if lines[0] == '':
+        # 先頭行が空行の場合は削除
+        lines.pop(0)
+
     if lines[-1] == '':
         # 最終行が空行の場合は削除
         lines.pop()
@@ -184,7 +194,7 @@ def parse_patch(p):
 
     remove_only = not [line for line in lines if line.startswith('+')]
 
-    for current_line, line in enumerate(lines):
+    for current_line, line in enumerate(lines, 1):
         if line.startswith('-'):
             old_hunk_lines.append(line[1:])
         elif line.startswith('+'):
@@ -192,7 +202,7 @@ def parse_patch(p):
             new_line += 1
         else:
             old_hunk_lines.append(line)
-            if remove_only or (current_line > skip_start and current_line <= len(lines) - skip_end):
+            if remove_only or (current_line > skip_start and current_line <= len(lines) - skip_end):  # noqa: E501
                 new_hunk_lines.append(f'{new_line}: {line}')
             else:
                 new_hunk_lines.append(f'{line}')
@@ -203,50 +213,54 @@ def parse_patch(p):
         'new_hunk': '\n'.join(new_hunk_lines)
     }
 
-# def cleaned_patch(patch):
-#     regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
-# 
-#     pattern = ' '.join(['diff', '--git', 'a/'])
-#     diffs = []
-#     for diff in patch.split(pattern):
-#         # patchを"diff --git "（ファイルごと）で分割
-#         if not diff.split():
-#             continue
-#         patches = []
-#         iter = reversed(list(re.finditer(regex, diff, re.MULTILINE)))
-#         _dict = {
-#             'diff': diff
-#         }
-#         for p in iter:
-#             match, old_begin, old_diff, new_begin, new_diff = p.groups()
-#             # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
-#             index = diff.rindex(match)
-#             patch = diff[index + len(match):]
-#             diff = diff[:index]
-#             patches.append({
-#                 'patch': patch,
-#                 'old_hunk': {
-#                     'start_line': int(old_begin),
-#                     'end_line': int(old_begin) + int(old_diff) - 1,
-#                 },
-#                 'new_hunk': {
-#                     'start_line': int(new_begin),
-#                     'end_line': int(new_begin) + int(new_diff) - 1,
-#                 }
-#             })
-#         _dict['patches'] = reversed(patches)
-#         diffs.append(_dict)
-# 
-#     ret = []
-#     for d in diffs:
-#         hunks = []
-#         for p in d['patches']:
-#             hunks.append(parse_patch(p))
-#         ret.append({
-#             'diff': d['diff'],
-#             'hunks': hunks
-#         })
-#     return ret
+
+def chat(user_message, debug, jp=False):
+    system_message = {
+        "role": "system",
+        "content": prompt._SYSTEM_MESSAGE['default']
+    }
+    if jp:
+        system_message['content'] += 'IMPORTANT: Entire response must be in the language with ISO code: ja-JP'  # noqa: E501
+
+    messages = [
+        system_message,
+    ]
+    messages.append(
+        {
+            "role": "user",
+            "content": user_message,
+        },
+    )
+
+    if debug > 2:
+        print('************* request *************')
+        print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
+
+    finish_reason = None
+    content = ''
+    while finish_reason in (None, 'max_tokens', 'length', 'bad_request'):
+        print('xxxxxx')
+        for m in messages:
+            print(f'{m["role"]=}')
+            print(f'{len(m["content"])=}')
+        print('xxxxxx')
+        try:
+            response = completion(model=AI_MODEL, messages=messages)
+            finish_reason = response.finish_reason
+            message = response.get('choices', [{}])[-1].get('message', {})
+            messages.append(dict(message))
+            content += message.get('content')
+        except BadRequestError as e:
+            print(e)
+            finish_reason = 'bad_request'
+            time.sleep(10)
+        print(finish_reason)
+
+    if debug > 1:
+        print('************* response **********')
+        print(f'{Color.GREEN}{content}{Color.RESET}')
+
+    return content
 
 
 def main(args):
@@ -272,6 +286,8 @@ def main(args):
 
     bitbucket_pr_id = args.bitbucket_pr_id
 
+    debug = args.debug
+
     cloud = Cloud(
         username=bitbucket_username,
         token=bitbucket_token,
@@ -279,13 +295,6 @@ def main(args):
 
     repository = cloud.repositories.get(bitbucket_workspace, bitbucket_repository)  # noqa: E501
     pr = repository.pullrequests.get(bitbucket_pr_id)
-
-    responses = []
-
-    system_messages = {
-        "role": "system",
-        "content": prompt._SYSTEM_MESSAGE['default']
-    }
 
     # PRのタイトル
     prompt.title = pr.title
@@ -333,12 +342,14 @@ def main(args):
             }
         )
 
-        print(f'************* filename={prompt.filename} **********')
-        response = completion(model=AI_MODEL, messages=messages)
-        content = response.get('choices', [{}])[-1].get('message', {}).get('content')
-        print('************* response **********')
-        print(f'{Color.GREEN}{content}{Color.RESET}')
-        responses.append(content)
+        if debug > 0:
+            print(f'************* filename={prompt.filename} **********')
+
+        if debug > 2:
+            print('************* request *************')
+            print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
+
+        content = chat(prompt.summarize_file_diff, debug)
 
         triage_regex = r"\[TRIAGE\]:\s*(NEEDS_REVIEW|APPROVED)"
         triage_match = re.search(triage_regex, content, re.MULTILINE)
@@ -348,51 +359,30 @@ def main(args):
             needs_review = triage == 'NEEDS_REVIEW'
 
         if needs_review:
-            summary = re.sub(r"^.*triage.*$", '', content, 0, re.MULTILINE | re.IGNORECASE).strip()
+            summary = re.sub(r"^.*triage.*$", '', content, 0, re.MULTILINE | re.IGNORECASE).strip()  # noqa: E501
 
             prompt.short_summary = summary
-            language = ''
-            messages = [
-                {
-                    "role": "system",
-                    "content": prompt._SYSTEM_MESSAGE['default'] + 'IMPORTANT: Entire response must be in the language with ISO code: ja-JP',  # noqa: E501
-                },
-            ]
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f'{language}\n{prompt.review_file_diff}',
-                }
-            )
 
-            # print('************* messages **********')
-            # print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
-
-            response = completion(model=AI_MODEL, messages=messages)
-            content = response.get('choices', [{}])[0].get('message', {}).get('content')
-            print('************* response **********')
-            print(f'{Color.BLUE}{content}{Color.RESET}')
-            print(response)
+            content = chat(prompt.review_file_diff, debug, jp=True)
 
             reviews = parse_review(content, patches)
-            # print('parse_review ended!!')
-            # print(reviews)
             lgtm_count = 0
             review_count = 0
             print(f'{len(reviews)=}')
             for review in reviews:
-                if review['comment'].find('LGTM') > -1 or review['comment'].find('looks good to me') > -1:
+                if review['comment'].find('LGTM') > -1 or review['comment'].find('looks good to me') > -1:  # noqa: E501
                     lgtm_count += 1
                     continue
                 review_count += 1
                 # review_comment(filename, link, review)
-                print(f'''{Color.YELLOW}
-                {filename=}
-                {link=}
-                {review['start_line']=}
-                {review['end_line']=}
-                {review['comment']=}
-                {Color.RESET}''')
+                if debug > 0:
+                    print(f'''{Color.YELLOW}
+                    {filename=}
+                    {link=}
+                    {review['start_line']=}
+                    {review['end_line']=}
+                    {review['comment']=}
+                    {Color.RESET}''')
 
                 data = {
                     "content": {
@@ -403,48 +393,13 @@ def main(args):
                         "to": review['start_line'],
                     },
                 }
-                ret = pr.post('comments', data=data)
-                print(ret)
+                pr.post('comments', data=data)
 
             print(f'{lgtm_count=}')
             print(f'{review_count=}')
 
 
-
-
-def review_comment(filename, link, review):
-    start_line = review['start_line']
-    end_line = review['end_line']
-    comment = review['comment']
-    print(f'''{Color.YELLOW}
-    {filename=}
-    {link=}
-    {start_line=}
-    {end_line=}
-    {comment=}
-    {Color.RESET}''')
-
-    data = {
-        "content": {
-            "raw": 'we are sapporo',
-        },
-        "inline": {
-            "path": filename,
-            "to": start_line
-        },
-    }
-
-    ret = pr.post('comments', data=data)
-    print(ret)
-
-    return 0
-
-
-
-
-
 def parse_review(content, patches):
-    # print('parse_review')
     reviews = []
     content = saniteze_response(content.strip())
 
@@ -453,7 +408,6 @@ def parse_review(content, patches):
     comment_separator = '---'
 
     def store_review(current_start_line, current_end_line, current_comment):
-        # print('store_review')
         if current_start_line is not None and current_end_line is not None:
             review = {
                 'start_line': current_start_line,
@@ -504,7 +458,6 @@ def parse_review(content, patches):
     current_comment = ''
 
     for line in lines:
-        # print(f'{line=}')
         line_number_range_match = re.match(line_number_range_regex, line)
 
         if line_number_range_match:
@@ -530,23 +483,17 @@ def parse_review(content, patches):
 
 
 def saniteze_response(content):
-    # print('saniteze_response')
     content = sanitize_code_brock(content,  'suggestion')
     content = sanitize_code_brock(content,  'diff')
     return content
 
 
 def sanitize_code_brock(comment, code_block_label):
-    # print(f'sanitize_code_brock {code_block_label=}')
-    # comment = "レビューを行いました。以下の通りです。\n\n2-18:\nLGTM!\n\n19-127:\nリクエストの認証と認可機構、そしてLambda関数の呼び出しのためのヘルパー関数を含んでいます。以下のコメントがあります。\n\n59-60:\n```diff\n- ChallengeResponses=challenge_response,\n+    ChallengeResponses=challenge_response['ChallengeResponses'],```\n`challenge_response`はdictで、`ChallengeResponses`キーに値が含まれています。したがって、キーを明示的に参照する必要があります。\n\n93-99:\nLambdaクライアントの作成時に認証情報を渡すのは、セキュリティ上の懸念があります。代わりに、Lambdaの実行ロールを使用するか、一時的な認証情報を取得すること"  # noqa: E501
-    # code_block_label = 'diff'
-
     code_block_start = f'```{code_block_label}'
     line_number_regex = r"^ *(\d+):"
     code_block_end = '```'
     code_block_start_index = comment.find(code_block_start)
     while code_block_start_index != -1:
-        # print(f'{code_block_start_index=}')
         code_block_end_index = comment.find(code_block_end, code_block_start_index)
         code_block = comment[code_block_start_index:code_block_end_index]
         code_block = code_block.replace(code_block_start, '').replace(code_block_end, '').strip()
@@ -586,6 +533,12 @@ if __name__ == "__main__":
         '--bitbucket-pr-id',
         type=int,
         required=True,
+    )
+
+    parser.add_argument(
+        '--debug',
+        type=int,
+        default=0,
     )
 
     args = parser.parse_args()
