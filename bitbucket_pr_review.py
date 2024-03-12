@@ -321,7 +321,10 @@ def main(args):
         # patches['hunk'] = '\n'.join(hunks)
 
         messages = [
-            system_messages
+            {
+                "role": "system",
+                "content": prompt._SYSTEM_MESSAGE['default'],
+            },
         ]
         messages.append(
             {
@@ -350,7 +353,10 @@ def main(args):
             prompt.short_summary = summary
             language = ''
             messages = [
-                system_messages
+                {
+                    "role": "system",
+                    "content": prompt._SYSTEM_MESSAGE['default'] + 'IMPORTANT: Entire response must be in the language with ISO code: ja-JP',  # noqa: E501
+                },
             ]
             messages.append(
                 {
@@ -379,9 +385,31 @@ def main(args):
                     lgtm_count += 1
                     continue
                 review_count += 1
-                review_comment(filename, link, review)
+                # review_comment(filename, link, review)
+                print(f'''{Color.YELLOW}
+                {filename=}
+                {link=}
+                {review['start_line']=}
+                {review['end_line']=}
+                {review['comment']=}
+                {Color.RESET}''')
+
+                data = {
+                    "content": {
+                        "raw": review['comment'],
+                    },
+                    "inline": {
+                        "path": filename,
+                        "to": review['start_line'],
+                    },
+                }
+                ret = pr.post('comments', data=data)
+                print(ret)
+
             print(f'{lgtm_count=}')
             print(f'{review_count=}')
+
+
 
 
 def review_comment(filename, link, review):
@@ -395,6 +423,24 @@ def review_comment(filename, link, review):
     {end_line=}
     {comment=}
     {Color.RESET}''')
+
+    data = {
+        "content": {
+            "raw": 'we are sapporo',
+        },
+        "inline": {
+            "path": filename,
+            "to": start_line
+        },
+    }
+
+    ret = pr.post('comments', data=data)
+    print(ret)
+
+    return 0
+
+
+
 
 
 def parse_review(content, patches):

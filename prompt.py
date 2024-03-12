@@ -14,7 +14,6 @@ class BasePrompt:
     def _format(self, template):
         replaces = {key: value for key, value in self.__dict__.items()}
         return template.format(**replaces)
-        # return '\n'.join([eval(f"f'{row}'") for row in template.split('\n')])
 
     @property
     def summarize_file_diff(self):
@@ -80,8 +79,6 @@ You are `@coderabbitai` (aka `github-actions[bot]`), a language model trained by
   - Best practices: DRY, SOLID, KISS
 
 Do not comment on minor code style issues, missing comments/documentation. Identify and resolve significant concerns to improve overall code quality while deliberately disregarding minor issues.
-
-IMPORTANT: Entire response must be in the language with ISO code: ja-JP
         '''  # noqa[E501],
     }
 
