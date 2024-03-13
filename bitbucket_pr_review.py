@@ -18,7 +18,7 @@ from litellm import BadRequestError, completion
 import prompt as prompt_module
 
 sentry_sdk.init(
-    dsn=os.environ.get('SENTRY_DSN'),
+    dsn=os.environ.get('SENTRY_DSN', ''),
     enable_tracing=True
 )
 
@@ -100,7 +100,7 @@ class Color:
     # 不可視
     INVISIBLE = '\033[08m'
     # 文字色と背景色を反転
-    REVERCE = '\033[07m'
+    REVERSE = '\033[07m'
 
     # (背景)黒
     BG_BLACK = '\033[40m'
@@ -261,11 +261,6 @@ def chat(user_message: str, debug: int, jp: bool = False) -> str:
     content = ''
     while finish_reason in (None, 'max_tokens', 'length', 'bad_request'):
         # 終了理由がNone, max_tokens, length, bad_requestの場合は継続
-        print('xxxxxx')
-        for m in messages:
-            print(f'{m["role"]=}')
-            print(f'{len(m["content"])=}')
-        print('xxxxxx')
         try:
             # 生成AIにメッセージを送信
             response = completion(model=ai_model, messages=messages)
@@ -276,7 +271,7 @@ def chat(user_message: str, debug: int, jp: bool = False) -> str:
             # 送信メッセージにレスポンスを追加
             messages.append(dict(message))
             # レスポンスメッセージを連結
-            content += message.get('content')
+            content += message.get('content', '')
         except BadRequestError:
             # BadRequestErrorが発生した場合（2024/03/13時点でBedrockのClaude3だと3回目以降のやり取りができない）
             finish_reason = 'bad_request'
@@ -286,7 +281,6 @@ def chat(user_message: str, debug: int, jp: bool = False) -> str:
             content = ''
         except Exception:
             raise
-        print(finish_reason)
 
     if debug > 1:
         print('************* response **********')
@@ -562,7 +556,7 @@ def parse_review(response, hunks):
             reviews.append(review)
 
     # レビュー結果をサニタイズする
-    response = saniteze_response(response.strip())
+    response = sanitize_response(response.strip())
 
     # レビュー結果を行単位に分割
     lines = response.split('\n')
@@ -615,7 +609,7 @@ def parse_review(response, hunks):
     return reviews
 
 
-def saniteze_response(content):
+def sanitize_response(content):
     """
     レビュー結果をサニタイズする
     """
