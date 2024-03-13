@@ -1,18 +1,19 @@
+import tomllib
+import os
+
+
 
 class BasePrompt:
-    _SYSTEM_MESSAGE = {}
-    _SUMMARIZE = {}
-    _SUMMARIZE_RELEASE_NOTES = {}
-    _SUMMARIZE_FILE_DIFF = ''
-    _TRIAGE_FILE_DIFF = ''
-    _SUMMARIZE_CHANGESETS = ''
-    _SUMMARIZE_PREFIX = ''
-    _SUMMARIZE_SHORT = ''
-    _REVIEW_FILE_DIFF = ''
-    _COMMENT = ''
+    prompt = {}
+
+    def __init__(self, use_prompt='default'):
+        dir_path = os.path.dirname(os.path.abspath("__file__"))
+        path = os.path.join(dir_path, 'prompt.toml')
+        with open(path, 'rb') as f:
+            self.prompt = tomllib.load(f)[use_prompt]
 
     def _format(self, template):
-        replaces = {key: value for key, value in self.__dict__.items()}
+        replaces = {f'{{{{{key}}}}}': value for key, value in self.__dict__.items()}
         return template.format(**replaces)
 
     @property
