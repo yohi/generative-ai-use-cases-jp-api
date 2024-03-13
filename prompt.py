@@ -289,7 +289,7 @@ LGTM!
 
 ## Changes made to `{filename}` for your review
 
-{patches}
+{hunk}
 
 ''' # noqa[E501]
 

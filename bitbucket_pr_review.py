@@ -5,39 +5,37 @@ https://github.com/aws-samples/generative-ai-use-cases-jp/actions/runs/700493817
 https://zenn.dev/t_dai
 https://zenn.dev/tadyjp/scraps/a7510f838edf8c
 """
-import time
-import litellm
-import re
 import argparse
-from copy import deepcopy
-from types import new_class
-from atlassian.bitbucket import Cloud
 import os
-import logging
-from dotenv import load_dotenv
-from litellm import BadRequestError, completion, encode, get_max_tokens, ContextWindowExceededError, RateLimitError  # noqa: E501
-from pprint import pprint
-import prompt as prompt_module
+import re
+from copy import deepcopy
+
 import sentry_sdk
+from atlassian.bitbucket import Cloud
+from dotenv import load_dotenv
+from litellm import BadRequestError, completion
+
+import prompt as prompt_module
 
 sentry_sdk.init(
     dsn=os.environ.get('SENTRY_DSN'),
     enable_tracing=True
 )
 
-
-# litellm.set_verbose = True
-
-dir_path = os.path.dirname(os.path.abspath("__file__"))
-dotenv_path = os.path.join(dir_path, '.env')
-load_dotenv(dotenv_path, verbose=True)
-
+# AIモデルの定義
 GEMINI = 'gemini/gemini-pro'
 CLAUDE_3 = 'claude-3-sonnet-20240229'
 BEDROCK_CLAUDE_2_1 = 'bedrock/anthropic.claude-v2:1'
 BEDROCK_CLAUDE_3 = 'bedrock/anthropic.claude-3-sonnet-20240229-v1:0'
 
+# デフォルトで使用するAIモデル
 AI_MODEL = BEDROCK_CLAUDE_3
+
+# dotenv周りの設定
+dir_path = os.path.dirname(os.path.abspath("__file__"))
+dotenv_path = os.path.join(dir_path, '.env')
+load_dotenv(dotenv_path, verbose=True)
+
 
 prompt = prompt_module.MyPrompt()
 
@@ -76,109 +74,116 @@ prompt = prompt_module.MyPrompt()
 
 
 class Color:
-    BLACK = '\033[30m'  # (文字)黒
-    RED = '\033[31m'  # (文字)赤
-    GREEN = '\033[32m'  # (文字)緑
-    YELLOW = '\033[33m'  # (文字)黄
-    BLUE = '\033[34m'  # (文字)青
-    MAGENTA = '\033[35m'  # (文字)マゼンタ
-    CYAN = '\033[36m'  # (文字)シアン
-    WHITE = '\033[37m'  # (文字)白
-    COLOR_DEFAULT = '\033[39m'  # 文字色をデフォルトに戻す
-    BOLD = '\033[1m'   # 太字
-    UNDERLINE = '\033[4m'   # 下線
-    INVISIBLE = '\033[08m'  # 不可視
-    REVERCE = '\033[07m'  # 文字色と背景色を反転
-    BG_BLACK = '\033[40m'  # (背景)黒
-    BG_RED = '\033[41m'  # (背景)赤
-    BG_GREEN = '\033[42m'  # (背景)緑
-    BG_YELLOW = '\033[43m'  # (背景)黄
-    BG_BLUE = '\033[44m'  # (背景)青
-    BG_MAGENTA = '\033[45m'  # (背景)マゼンタ
-    BG_CYAN = '\033[46m'  # (背景)シアン
-    BG_WHITE = '\033[47m'  # (背景)白
-    BG_DEFAULT = '\033[49m'  # 背景色をデフォルトに戻す
-    RESET = '\033[0m'   # 全てリセット
+    # (文字)黒
+    BLACK = '\033[30m'
+    # (文字)赤
+    RED = '\033[31m'
+    # (文字)緑
+    GREEN = '\033[32m'
+    # (文字)黄
+    YELLOW = '\033[33m'
+    # (文字)青
+    BLUE = '\033[34m'
+    # (文字)マゼンタ
+    MAGENTA = '\033[35m'
+    # (文字)シアン
+    CYAN = '\033[36m'
+    # (文字)白
+    WHITE = '\033[37m'
+    # 文字色をデフォルトに戻す
+    COLOR_DEFAULT = '\033[39m'
+
+    # 太字
+    BOLD = '\033[1m'
+    # 下線
+    UNDERLINE = '\033[4m'
+    # 不可視
+    INVISIBLE = '\033[08m'
+    # 文字色と背景色を反転
+    REVERCE = '\033[07m'
+
+    # (背景)黒
+    BG_BLACK = '\033[40m'
+    # (背景)赤
+    BG_RED = '\033[41m'
+    # (背景)緑
+    BG_GREEN = '\033[42m'
+    # (背景)黄
+    BG_YELLOW = '\033[43m'
+    # (背景)青
+    BG_BLUE = '\033[44m'
+    # (背景)マゼンタ
+    BG_MAGENTA = '\033[45m'
+    # (背景)シアン
+    BG_CYAN = '\033[46m'
+    # (背景)白
+    BG_WHITE = '\033[47m'
+    # 背景色をデフォルトに戻す
+    BG_DEFAULT = '\033[49m'
+
+    # 全てリセット
+    RESET = '\033[0m'
 
 
-def cleaned_patch(diff_patch, pr):
+# def cleaned_patch(diff_patch, pr):
+#     """
+#     """
+#     file_split_pattern = ' '.join(['diff', '--git', 'a/'])
+#     patch_split_regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
+# 
+#     # patchを"diff --git "（ファイルごと）で分割
+#     diff_patches = diff_patch.split(file_split_pattern)[1:]
+# 
+#     files = []
+#     for index, diffstat in enumerate(pr.diffstat()):
+#         filediff = diff_patches[index]
+#         filename = diffstat.new.escaped_path
+#         link = diffstat.new.get_link('self')
+# 
+#         patches = []
+#         iter = reversed(list(re.finditer(patch_split_regex, filediff, re.MULTILINE)))
+#         _dict = {
+#             'filename': filename,
+#             'link': link,
+#             'filediff': filediff,
+#         }
+#         for m in iter:
+#             match, old_begin, old_diff, new_begin, new_diff = m.groups()
+#             # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
+#             index = filediff.rindex(match)
+#             patch = filediff[index + len(match):]
+#             filediff = filediff[:index]
+#             patch = {
+#                 'patch': patch,
+#                 'old_hunk_line': {
+#                     'start_line': int(old_begin),
+#                     'end_line': int(old_begin) + int(old_diff) - 1,
+#                 },
+#                 'new_hunk_line': {
+#                     'start_line': int(new_begin),
+#                     'end_line': int(new_begin) + int(new_diff) - 1,
+#                 }
+#             }
+#             patches.append(parse_patch(patch))
+#         _dict['patches'] = list(reversed(patches))
+#         files.append(_dict)
+# 
+#     return files
+
+
+def parse_hunk(p):
     """
-
-    [
-        {
-            "filename": "src/main/java/com/example/demo/HelloController.java",
-            "link": "https://bitbucket.org/.../src/main/java/com/example/demo/HelloController.java",
-            "filediff": "",
-            "patches": [
-                {
-                    "patch": "",
-                    "hunks": 
-                    "old_hunk": {
-                        "start_line": 1,
-                        "end_line": 1
-                    },
-                    "new_hunk": {
-                        "start_line": 1,
-                        "end_line": 1
-                    }
-                }
-            ]
-        }
-
-    ]
+    hunkをパース（解析）して、old_hunkとnew_hunkを追加して返す
     """
-    file_split_pattern = ' '.join(['diff', '--git', 'a/'])
-    patch_split_regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
-
-    # patchを"diff --git "（ファイルごと）で分割
-    diff_patches = diff_patch.split(file_split_pattern)[1:]
-
-    files = []
-    for index, diffstat in enumerate(pr.diffstat()):
-        filediff = diff_patches[index]
-        filename = diffstat.new.escaped_path
-        link = diffstat.new.get_link('self')
-
-        patches = []
-        iter = reversed(list(re.finditer(patch_split_regex, filediff, re.MULTILINE)))
-        _dict = {
-            'filename': filename,
-            'link': link,
-            'filediff': filediff,
-        }
-        for m in iter:
-            match, old_begin, old_diff, new_begin, new_diff = m.groups()
-            # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
-            index = filediff.rindex(match)
-            patch = filediff[index + len(match):]
-            filediff = filediff[:index]
-            patch = {
-                'patch': patch,
-                'old_hunk_line': {
-                    'start_line': int(old_begin),
-                    'end_line': int(old_begin) + int(old_diff) - 1,
-                },
-                'new_hunk_line': {
-                    'start_line': int(new_begin),
-                    'end_line': int(new_begin) + int(new_diff) - 1,
-                }
-            }
-            patches.append(parse_patch(patch))
-        _dict['patches'] = list(reversed(patches))
-        files.append(_dict)
-
-    return files
-
-
-def parse_patch(p):
-    # TODO
-    old_hunk_lines = [
-    ]
-    new_hunk_lines = [
-    ]
-
+    # 古いhunkの行を格納するリスト
+    old_hunk_lines = []
+    # 新しいhunkの行を格納するリスト
+    new_hunk_lines = []
+    # 新しいhunkの開始行
     new_line = p['new_hunk_line']['start_line']
-    lines = p['patch'].split('\n')
+
+    # パッチを行レベルに分割
+    lines = p['hunk'].split('\n')
 
     if lines[0] == '':
         # 先頭行が空行の場合は削除
@@ -192,17 +197,22 @@ def parse_patch(p):
     skip_start = 3
     skip_end = 3
 
+    # 新規追加行が存在しないか否か
     remove_only = not [line for line in lines if line.startswith('+')]
 
     for current_line, line in enumerate(lines, 1):
+        # 1行ずつ解析
         if line.startswith('-'):
+            # 行頭が"-"の場合は古いhunkの行として追加
             old_hunk_lines.append(line[1:])
         elif line.startswith('+'):
+            # 行頭が"+"の場合は新しいhunkの行として追加
             new_hunk_lines.append(f'{new_line}: {line[1:]}')
             new_line += 1
         else:
             old_hunk_lines.append(line)
-            if remove_only or (current_line > skip_start and current_line <= len(lines) - skip_end):  # noqa: E501
+            if remove_only or (skip_start < current_line <= len(lines) - skip_end):  # noqa: E501
+                # 新規追加行がない場合、または前後の注釈をスキップする行数の範囲内の場合は新しいhunkに行数を記述  # noqa: E501
                 new_hunk_lines.append(f'{new_line}: {line}')
             else:
                 new_hunk_lines.append(f'{line}')
@@ -214,15 +224,30 @@ def parse_patch(p):
     }
 
 
-def chat(user_message, debug, jp=False):
+def chat(user_message: str, debug: int, jp: bool = False) -> str:
+    """
+    生成AIにメッセージを送信して応答を受け取る
+
+    Args:
+        user_message: 送信するメッセージ
+        debug: デバッグレベル
+        jp: 日本語モードか否か
+
+    Returns:
+        生成AIからの応答
+    """
     ai_model = AI_MODEL
+
+    # システムロールのメッセージ
     system_message = {
         "role": "system",
         "content": prompt._SYSTEM_MESSAGE['default']
     }
     if jp:
+        # 日本語モードの場合はシステムメッセージに日本語で応答するよう指示を追加
         system_message['content'] += '\nIMPORTANT: Entire response must be in the language with ISO code: ja-JP'  # noqa: E501
 
+    # 送信メッセージを格納するリスト
     messages = [
         system_message,
     ]
@@ -233,6 +258,7 @@ def chat(user_message, debug, jp=False):
         },
     )
 
+    # 初回メッセージのコピーを保持
     first_messages = deepcopy(messages)
 
     if debug > 2:
@@ -243,23 +269,32 @@ def chat(user_message, debug, jp=False):
     finish_reason = None
     content = ''
     while finish_reason in (None, 'max_tokens', 'length', 'bad_request'):
+        # 終了理由がNone, max_tokens, length, bad_requestの場合は継続
         print('xxxxxx')
         for m in messages:
             print(f'{m["role"]=}')
             print(f'{len(m["content"])=}')
         print('xxxxxx')
         try:
+            # 生成AIにメッセージを送信
             response = completion(model=ai_model, messages=messages)
+            # 終了理由の取得
             finish_reason = response.finish_reason
+            # レスポンスメッセージの取得
             message = response.get('choices', [{}])[-1].get('message', {})
+            # 送信メッセージにレスポンスを追加
             messages.append(dict(message))
+            # レスポンスメッセージを連結
             content += message.get('content')
-        except BadRequestError as e:
-            print(e)
+        except BadRequestError:
+            # BadRequestErrorが発生した場合（2024/03/13時点でBedrockのClaude3だと3回目以降のやり取りができない）
             finish_reason = 'bad_request'
+            # AIモデルをBedrockのClaude2.1に変更し最初からやり直す
             ai_model = BEDROCK_CLAUDE_2_1
             messages = first_messages
             content = ''
+        except Exception:
+            raise
         print(finish_reason)
 
     if debug > 1:
@@ -268,8 +303,74 @@ def chat(user_message, debug, jp=False):
 
     return content
 
+def parse_patch(pr):
+    """
+    """
+    # ファイル単位で分割するためのパターン TODO
+    file_split_pattern = ' '.join(['diff', '--git', 'a/'])
+    # patch単位で分割するための正規表現
+    patch_split_regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
+
+    # patchを"diff --git "（ファイルごと）で分割
+    patches = pr.diff().split(file_split_pattern)[1:]
+
+    ret = []
+    for index, diffstat in enumerate(pr.diffstat()):
+        patch = patches[index]
+        filename = diffstat.new.escaped_path
+        link = diffstat.new.get_link('self')
+
+        iter = reversed(list(re.finditer(patch_split_regex, patch, re.MULTILINE)))
+
+        hunks = []
+        d = {
+            'filename': filename,
+            'link': link,
+            'patch': patch,
+        }
+        for m in iter:
+            match, old_begin, old_diff, new_begin, new_diff = m.groups()
+            # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
+            index = patch.rindex(match)
+            hunk = patch[index + len(match):]
+            patch = patch[:index]
+            hunk = {
+                'hunk': hunk,
+                'old_hunk_line': {
+                    'start_line': int(old_begin),
+                    'end_line': int(old_begin) + int(old_diff) - 1,
+                },
+                'new_hunk_line': {
+                    'start_line': int(new_begin),
+                    'end_line': int(new_begin) + int(new_diff) - 1,
+                }
+            }
+            hunks.append(parse_hunk(hunk))
+        d['hunks'] = list(reversed(hunks))
+        ret.append(d)
+
+    return ret
+
+
+def parse_pull_request(pr):
+    title = pr.title
+    description = pr.description
+    patches = parse_patch(pr)
+    return {
+        'title': title,
+        'description': description,
+        'patches': patches,
+    }
+
+
 
 def main(args):
+    """
+    メイン処理
+
+    Args:
+        args: コマンドライン引数
+    """
     bitbucket_url = args.bitbucket_url
     if not bitbucket_url:
         raise Exception('BITBUCKET_URL is required')
@@ -294,46 +395,49 @@ def main(args):
 
     debug = args.debug
 
+    # Atlassian Cloudeオブジェクトの作成
     cloud = Cloud(
         username=bitbucket_username,
         token=bitbucket_token,
     )
 
+    # リポジトリの取得
     repository = cloud.repositories.get(bitbucket_workspace, bitbucket_repository)  # noqa: E501
+    # PRの取得
     pr = repository.pullrequests.get(bitbucket_pr_id)
 
-    # PRのタイトル
-    prompt.title = pr.title
-    # PRの説明
-    prompt.description = pr.description
-    # PRのdiffpatch
-    diff_patch = pr.diff()
+    parsed_pr = parse_pull_request(pr)
 
-    files = cleaned_patch(diff_patch, pr)
-    for file in files:
-        patches = file['patches']
-        filename = file['filename']
-        link = file['link']
-        filediff = file['filediff']
+    # PRのタイトル
+    prompt.title = parsed_pr['title']
+    # PRの説明
+    prompt.description = parsed_pr['description']
+
+    patches = parsed_pr['patches']
+
+    for p in patches:
+        filename = p['filename']
+        link = p['link']
+        patch = p['patch']
+        hunks = p['hunks']
+
         prompt.filename = filename
         prompt.link = link
-        # prompt.filediff = file['filediff']
-        prompt.diff = filediff
-        hunks = []
-        for patch in patches:
-            hunks.append(f'''
+        prompt.patch = patch
+        prompt.diff = patch  # todo
+
+        prompt.hunk = '\n'.join([f'''
 ---new_hunk---
 ```
-{patch["new_hunk"]}
+{hunk["new_hunk"]}
 ```
 
 ---old_hunk---
 ```
-{patch["old_hunk"]}
+{hunk["old_hunk"]}
 ```
-        ''')
-        prompt.patches = '\n'.join(hunks)
-        # patches['hunk'] = '\n'.join(hunks)
+''' for hunk in hunks])
+
 
         messages = [
             {
@@ -371,7 +475,7 @@ def main(args):
 
             content = chat(prompt.review_file_diff, debug, jp=True)
 
-            reviews = parse_review(content, patches)
+            reviews = parse_review(content, hunks)
             lgtm_count = 0
             review_count = 0
             print(f'{len(reviews)=}')
