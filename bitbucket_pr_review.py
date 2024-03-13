@@ -124,52 +124,43 @@ class Color:
     # 全てリセット
     RESET = '\033[0m'
 
+def summarize(debug):
+    """
+    ファイルのdiffを要約する
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": prompt._SYSTEM_MESSAGE['default'],
+        },
+    ]
+    messages.append(
+        {
+            "role": "user",
+            "content": prompt.summarize_file_diff,
+        }
+    )
 
-# def cleaned_patch(diff_patch, pr):
-#     """
-#     """
-#     file_split_pattern = ' '.join(['diff', '--git', 'a/'])
-#     patch_split_regex = r"(^@@ -(\d+),(\d+) \+(\d+),(\d+) @@)"
-# 
-#     # patchを"diff --git "（ファイルごと）で分割
-#     diff_patches = diff_patch.split(file_split_pattern)[1:]
-# 
-#     files = []
-#     for index, diffstat in enumerate(pr.diffstat()):
-#         filediff = diff_patches[index]
-#         filename = diffstat.new.escaped_path
-#         link = diffstat.new.get_link('self')
-# 
-#         patches = []
-#         iter = reversed(list(re.finditer(patch_split_regex, filediff, re.MULTILINE)))
-#         _dict = {
-#             'filename': filename,
-#             'link': link,
-#             'filediff': filediff,
-#         }
-#         for m in iter:
-#             match, old_begin, old_diff, new_begin, new_diff = m.groups()
-#             # match（"@@ -W,X +Y,Z @@"）が最後に現れるところでで分割
-#             index = filediff.rindex(match)
-#             patch = filediff[index + len(match):]
-#             filediff = filediff[:index]
-#             patch = {
-#                 'patch': patch,
-#                 'old_hunk_line': {
-#                     'start_line': int(old_begin),
-#                     'end_line': int(old_begin) + int(old_diff) - 1,
-#                 },
-#                 'new_hunk_line': {
-#                     'start_line': int(new_begin),
-#                     'end_line': int(new_begin) + int(new_diff) - 1,
-#                 }
-#             }
-#             patches.append(parse_patch(patch))
-#         _dict['patches'] = list(reversed(patches))
-#         files.append(_dict)
-# 
-#     return files
+    if debug > 0:
+        print(f'************* filename={prompt.filename} **********')
 
+    if debug > 2:
+        print('************* request *************')
+        print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
+
+    return chat(prompt.summarize_file_diff, debug)
+
+def needs_review(response):
+    """
+    要約からレビューが必要か否かをのトリアージを返す
+    """
+    triage_regex = r"\[TRIAGE\]:\s*(NEEDS_REVIEW|APPROVED)"
+    triage_match = re.search(triage_regex, response, re.MULTILINE)
+    needs_review = True
+    if triage_match:
+        triage = triage_match.group(1)
+        needs_review = triage == 'NEEDS_REVIEW'
+    return needs_review
 
 def parse_hunk(p):
     """
@@ -305,6 +296,7 @@ def chat(user_message: str, debug: int, jp: bool = False) -> str:
 
 def parse_patch(pr):
     """
+    PRのパッチをパース（解析）して返す
     """
     # ファイル単位で分割するためのパターン TODO
     file_split_pattern = ' '.join(['diff', '--git', 'a/'])
@@ -353,6 +345,9 @@ def parse_patch(pr):
 
 
 def parse_pull_request(pr):
+    """
+    PRをパース（解析）して返す
+    """
     title = pr.title
     description = pr.description
     patches = parse_patch(pr)
@@ -361,7 +356,6 @@ def parse_pull_request(pr):
         'description': description,
         'patches': patches,
     }
-
 
 
 def main(args):
@@ -438,53 +432,36 @@ def main(args):
 ```
 ''' for hunk in hunks])
 
+        # ファイル差分の要約をAIに行わせてレスポンスを取得
+        summarize_response = summarize(debug)
 
-        messages = [
-            {
-                "role": "system",
-                "content": prompt._SYSTEM_MESSAGE['default'],
-            },
-        ]
-        messages.append(
-            {
-                "role": "user",
-                "content": prompt.summarize_file_diff,
-            }
-        )
+        if needs_review(summarize_response):
+            # トリアージでレビューが必要と判断された場合
 
-        if debug > 0:
-            print(f'************* filename={prompt.filename} **********')
+            # 要約からトリアージの部分を除去
+            summary = re.sub(r"^.*triage.*$", '', summarize_response, 0, re.MULTILINE | re.IGNORECASE).strip()  # noqa: E501
 
-        if debug > 2:
-            print('************* request *************')
-            print(f'{Color.RED}{messages[-1]["content"]}{Color.RESET}')
-
-        content = chat(prompt.summarize_file_diff, debug)
-
-        triage_regex = r"\[TRIAGE\]:\s*(NEEDS_REVIEW|APPROVED)"
-        triage_match = re.search(triage_regex, content, re.MULTILINE)
-        needs_review = True
-        if triage_match:
-            triage = triage_match.group(1)
-            needs_review = triage == 'NEEDS_REVIEW'
-
-        if needs_review:
-            summary = re.sub(r"^.*triage.*$", '', content, 0, re.MULTILINE | re.IGNORECASE).strip()  # noqa: E501
-
+            # プロンプトに要約を設定
             prompt.short_summary = summary
 
-            content = chat(prompt.review_file_diff, debug, jp=True)
+            # レビューをAIに行わせてレスポンスを取得
+            review_response = chat(prompt.review_file_diff, debug, jp=True)
 
-            reviews = parse_review(content, hunks)
+            # レビューレスポンスを解析
+            reviews = parse_review(review_response, hunks)
+
+            # LGTM（Looks Good To Me）のカウント
             lgtm_count = 0
+            # レビューのカウント
             review_count = 0
-            print(f'{len(reviews)=}')
+
             for review in reviews:
                 if review['comment'].find('LGTM') > -1 or review['comment'].find('looks good to me') > -1:  # noqa: E501
+                    # LGTM（Looks Good To Me）が含まれる場合はPRにコメントしない
                     lgtm_count += 1
                     continue
+
                 review_count += 1
-                # review_comment(filename, link, review)
                 if debug > 0:
                     print(f'''{Color.YELLOW}
                     {filename=}
@@ -503,21 +480,34 @@ def main(args):
                         "to": review['start_line'],
                     },
                 }
+                # PRにコメント
                 pr.post('comments', data=data)
 
             print(f'{lgtm_count=}')
             print(f'{review_count=}')
 
 
-def parse_review(content, patches):
+def parse_review(response, hunks):
+    """
+    AIが行ったレビュー結果を解析して返す
+
+    Args:
+        response:
+        hunks
+    """
+    # レビュー結果の解析を格納するリスト
     reviews = []
-    content = saniteze_response(content.strip())
 
-    lines = content.split('\n')
-    line_number_range_regex = r"(?:^|\s)(\d+)-(\d+):\s*$"
-    comment_separator = '---'
+    def store_review(current_start_line: int | None, current_end_line: int | None, current_comment: str) -> None:
+        """
+        レビュー結果の解析をリストに追加する
 
-    def store_review(current_start_line, current_end_line, current_comment):
+        Args:
+            current_start_line:
+            current_end_line:
+            current_comment:
+
+        """
         if current_start_line is not None and current_end_line is not None:
             review = {
                 'start_line': current_start_line,
@@ -530,75 +520,114 @@ def parse_review(content, patches):
             best_patch_end_line = -1
             max_intersection = 0
 
-            for p in patches:
-                start_line = p['new_hunk_line']['start_line']
-                end_line = p['new_hunk_line']['end_line']
+            for d in hunks:
+                # hunkの開始と終了行を取得
+                start_line = d['new_hunk_line']['start_line']
+                end_line = d['new_hunk_line']['end_line']
 
+                # レビュー結果の範囲とhunkの範囲の重なりを計算
                 intersection_start = max(review['start_line'], start_line)
                 intersection_end = min(review['end_line'], end_line)
                 intersection_length = max(0, intersection_end - intersection_start + 1)  # noqa: E501
 
+                # 最大の重なりを記録
                 if intersection_length > max_intersection:
                     max_intersection = intersection_length
                     best_patch_start_line = start_line
                     best_patch_end_line = end_line
+                    # レビュー結果がhunkの範囲内にあるか否か
                     within_patch = (intersection_length == review['end_line'] - review['start_line'] + 1)  # noqa: E501
 
                 if within_patch:
                     break
 
             if not within_patch:
+                # レビュー結果がhunkの範囲内にない場合は、最大の重なりを持つhunkにマッピングする
                 if best_patch_start_line != -1 and best_patch_end_line != -1:
+                    # レビュー結果がhunkの範囲外にある場合は、最大の重なりを持つhunkにマッピングする
                     review = {
                         'comment':  f'> Note: This review was outside of the patch, so it was mapped to the patch with the greatest overlap. Original lines [{review["start_line"]}-{review["end_line"]}]\n\n{review["comment"]}',  # noqa: E501
                         'start_line': best_patch_start_line,
                         'end_line': best_patch_end_line,
                     }
                 else:
+                    # レビュー結果がhunkの範囲外にあり、最大の重なりを持つhunkが見つからない場合は、最初のhunkにマッピングする
                     review = {
-                        'comment': f'> Note: This review was outside of the patch, but no patch was found that overlapped with it. Original lines [{review["start_line"]}-{review["end_line"]}]\n\n{review["comment"]}',  # noqa: E501'
-                        'start_line': patches[0]['new_hunk_line']['start_line'],  # noqa: E501
-                        'end_line': patches[0]['new_hunk_line']['end_line'],
+                        'comment': f'> Note: This review was outside of the patch, but no patch was found that overlapped with it. Original lines [{review["start_line"]}-{review["end_line"]}]\n\n{review["comment"]}',  # noqa: E501
+                        'start_line': hunks[0]['new_hunk_line']['start_line'],  # noqa: E501
+                        'end_line': hunks[0]['new_hunk_line']['end_line'],
                     }
 
+            # レビュー結果をリストに追加
             reviews.append(review)
 
+    # レビュー結果をサニタイズする
+    response = saniteze_response(response.strip())
+
+    # レビュー結果を行単位に分割
+    lines = response.split('\n')
+
+    # 行番号の範囲を抽出するための正規表現
+    line_number_range_regex = r"(?:^|\s)(\d+)-(\d+):\s*$"
+    # コメントの区切り文字
+    comment_separator = '---'
+
+    # 現在の開始行
     current_start_line = None
+    # 現在の終了行
     current_end_line = None
+    # 現在のコメント
     current_comment = ''
 
     for line in lines:
+        # レビュー結果を1行ずつ処理する
+
+        # 行番号の範囲を抽出
         line_number_range_match = re.match(line_number_range_regex, line)
 
         if line_number_range_match:
+            # 行番号の範囲が見つかった場合はそれまでのcurrent_commentに対してレビュー結果を解析させる
             store_review(current_start_line, current_end_line, current_comment)
+
+            # 現在の開始行と終了行を更新して次のレビュー結果を解析するためにコメントを初期化
             current_start_line = int(line_number_range_match.group(1))
             current_end_line = int(line_number_range_match.group(2))
             current_comment = ''
             continue
 
         if line.strip() == comment_separator:
+            # コメントの区切り文字が見つかった場合はそれまでのcurrent_commentに対してレビュー結果を解析させる
             store_review(current_start_line, current_end_line, current_comment)
+
+            # 現在の開始行と終了行、コメントを初期化
             current_start_line = None
             current_end_line = None
             current_comment = ''
             continue
 
         if current_start_line is not None and current_end_line is not None:
+            # 現在の開始行と終了行が設定されている場合はコメントにその行を追加
             current_comment += f'{line}\n'
 
+    # 最後のレビュー結果を解析させる
     store_review(current_start_line, current_end_line, current_comment)
 
     return reviews
 
 
 def saniteze_response(content):
+    """
+    レビュー結果をサニタイズする
+    """
     content = sanitize_code_brock(content,  'suggestion')
     content = sanitize_code_brock(content,  'diff')
     return content
 
 
 def sanitize_code_brock(comment, code_block_label):
+    """
+    コードブロックをサニタイズする
+    """
     code_block_start = f'```{code_block_label}'
     line_number_regex = r"^ *(\d+):"
     code_block_end = '```'
